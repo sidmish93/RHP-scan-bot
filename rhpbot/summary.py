@@ -71,6 +71,8 @@ def render(kind: str, company: str, filed: str, fields: dict[str, str], page: st
         lines.append("")
     if "bankers" in fields:
         lines.append(f"Bankers: {fields['bankers']}")
+    if "bankers" in fields and "sellers" in fields:
+        lines.append("")
     if "sellers" in fields:
         lines.append(f"Selling shareholders: {fields['sellers']}")
     if "business" in fields:

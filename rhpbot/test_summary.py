@@ -378,6 +378,17 @@ class SummaryTests(unittest.TestCase):
         )
         self.assertIn("https://www.sebi.gov.in/sebi_data/attachdocs/acme.pdf", body)
 
+    def test_bankers_and_sellers_are_separated(self):
+        body = render(
+            "RHP",
+            "Acme Limited",
+            "19 Nov 2026",
+            {"bankers": "Choice Capital Advisors Private Limited", "sellers": "none"},
+            "https://www.sebi.gov.in/filings/acme.html",
+            "https://www.sebi.gov.in/sebi_data/attachdocs/acme.pdf",
+        )
+        self.assertIn("Bankers: Choice Capital Advisors Private Limited\n\nSelling shareholders: none", body)
+
 
 if __name__ == "__main__":
     unittest.main()
