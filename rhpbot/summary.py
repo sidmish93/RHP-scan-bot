@@ -176,24 +176,78 @@ def _bank_name(raw: str) -> str:
     return name
 
 
+_OPENER = re.compile(
+    r"\b(?:We (?:are|own|operate|provide|carry|offer)|Our Company is|The Company is)\b",
+    re.I,
+)
+# A lettered or numbered subsection. The capital after the marker keeps "e.g." and "2026." from matching.
+_HEADING = re.compile(
+    r"\s+[a-h][.)]\s+[A-Z]|\s+(?:[1-9]|1[0-2])\.\s+[A-Z]"
+    r"|\s+(?:Set out below|The following table)\b",
+    re.I,
+)
+
+
 def _business(text: str) -> str:
-    """The opening business description, through the last sentence before the next subsection."""
-    anchor = text.upper().find("BUSINESS OVERVIEW")
+    """The company description from the primary-business summary.
+
+    The narrative sometimes starts "We own" rather than "We are", and it sometimes
+    sits under "a. Business overview". A later "Business overview" heading is only
+    a products table, so a match clipped at the end of that table is not used.
+    """
+    anchor = _business_anchor(text)
     if anchor < 0:
         return ""
-    region = text[anchor:anchor + 4000]
-    start = re.search(r"\b(?:We are|Our Company is|The Company is)\b", region)
-    if not start:
+    opener = _OPENER.search(text, anchor, anchor + 1200)
+    if not opener:
         return ""
-    body = region[start.start():]
-    stop = re.search(r"\s+[b-e][\.\)]\s+|\s+Set out below\b|\s+The following table\b", body, re.I)
-    if stop:
-        body = body[:stop.start()]
+    body = text[opener.start():opener.start() + 3500]
+    body = _until_heading(body)
+    body = re.sub(
+        r"\s+Business overview\s*[–\-]\s*products(?:\s+and|\s+or)?\s+services(?:\s+offered by our Company)?\s+",
+        " ",
+        body,
+        flags=re.I,
+    )
     body = re.sub(r"([A-Za-z])\d{1,2}\b", r"\1", body)
+    body = re.sub(r"\s+\.", ".", body)
+    body = re.sub(r"\s+In this context:\s*$", "", body, flags=re.I)
+    body = re.sub(r"\s+\d{1,3}\s*$", "", body)
     body = _SPACE.sub(" ", body).strip()
+    if len(body) < 40:
+        return ""
     if len(body) > 1800:
         body = body[:1800].rsplit(". ", 1)[0] + "."
     return body
+
+
+def _business_anchor(text: str) -> int:
+    upper = text.upper()
+    for needle in ("SUMMARY OF THE PRIMARY BUSINESS", "BUSINESS OVERVIEW"):
+        at = 0
+        while True:
+            at = upper.find(needle, at)
+            if at < 0:
+                break
+            if _OPENER.search(text, at, at + 1200):
+                return at
+            at += len(needle)
+    return -1
+
+
+def _until_heading(chunk: str) -> str:
+    stop = _HEADING.search(chunk)
+    if not stop:
+        return chunk
+    # A one-line lead-in before "a. Business overview" is the label, not the description.
+    if stop.start() < 160 and re.match(r"\s+a[.)]", stop.group(), re.I):
+        nxt = _HEADING.search(chunk, stop.end())
+        if nxt and nxt.start() - stop.end() > 80:
+            prose = re.search(r"\bWe [a-z]", chunk[stop.end():nxt.start()])
+            if prose:
+                return chunk[:stop.start()] + " " + chunk[stop.end() + prose.start():nxt.start()]
+            return chunk[:nxt.start()]
+    return chunk[:stop.start()]
 
 
 def _crore(raw: str, unit: str) -> str:

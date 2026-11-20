@@ -177,6 +177,46 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(fields["business"], paragraph.replace("growing1", "growing"))
         self.assertNotIn("...", fields["business"])
 
+    def test_company_description_can_start_with_we_own(self):
+        text = (
+            "Summary of the primary business We own and operate Burma Burma, India's largest specialty "
+            "Burmese restaurant chain. As of July 31, 2026, we operate 22 restaurants across nine cities. "
+            "a. Business Overview – Products and Services Our offerings include dine-in and delivery."
+        )
+        fields = summarize(text)
+        self.assertTrue(fields["business"].startswith("We own and operate Burma Burma"))
+        self.assertIn("22 restaurants", fields["business"])
+        self.assertNotIn("offerings include", fields["business"])
+
+    def test_business_comes_from_the_primary_summary_not_a_clipped_later_line(self):
+        later = "Business Overview - Products and Services " + ("Digital connectivity services. " * 80)
+        text = (
+            "Summary of the primary business We are a technology platform, built on proprietary digital "
+            "technology and pan-India digital connectivity. Since our inception, we have played a pivotal "
+            "role in democratising access to digital connectivity and digital services in India. "
+            "In this context: a) Our Company had 12,477 employees. "
+            + later
+            + "We are engaged in mobile networks."
+        )
+        fields = summarize(text)
+        self.assertTrue(fields["business"].startswith("We are a technology platform"))
+        self.assertIn("democratising access", fields["business"])
+        self.assertNotIn("employees", fields["business"])
+        self.assertNotIn("engaged", fields["business"])
+
+    def test_a_one_line_lead_in_keeps_the_products_paragraph(self):
+        text = (
+            "Summary of the primary business We are a financial technology company focused on digital gifting. "
+            "a. Business Overview - Products and services We act as a program manager for prepaid cards and "
+            "offer consumer spend management through our SpendPro platform. "
+            "b. Industries served and typical customers Banks and merchants."
+        )
+        fields = summarize(text)
+        self.assertIn("financial technology", fields["business"])
+        self.assertIn("SpendPro", fields["business"])
+        self.assertNotIn("Business Overview", fields["business"])
+        self.assertNotIn("Banks and merchants", fields["business"])
+
     def test_bank_name_drops_the_email_header(self):
         self.assertEqual(_bank_name("AND E- MAIL SBI Capital Markets Limited"), "SBI Capital Markets Limited")
         self.assertEqual(
