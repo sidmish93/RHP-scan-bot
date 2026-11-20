@@ -5,7 +5,9 @@ from __future__ import annotations
 import re
 
 _SPACE = re.compile(r"\s+")
-_BANK = re.compile(r"([A-Z][A-Za-z0-9&.,'’\-()][A-Za-z0-9&.,'’\-() ]{2,80}?(?:Limited|LLP))")
+_BANK = re.compile(
+    r"([A-Z][A-Za-z0-9&.,'’\-()][A-Za-z0-9&.,'’\-() ]{2,80}?(?i:Limited|LLP))"
+)
 # A size cell is either "Not applicable" or "up to N equity shares ... aggregating up to ₹X".
 # The rupee amount may still be the unset placeholder [●].
 _SIZE = re.compile(
@@ -160,10 +162,14 @@ def _size_text(match: re.Match) -> str:
 
 def _bank_name(raw: str) -> str:
     name = re.sub(r"^.*(?:TELEPHONE|LOGO|CONTACT PERSON)\s+", "", raw, flags=re.I)
+    name = re.sub(r"^.*\bbook running lead managers?\s+", "", name, flags=re.I)
+    name = re.sub(r"^(?:contact)\s+", "", name, flags=re.I)
     name = re.sub(r"^(?:.*\b)?(?:and\s+)?e-\s*mail\s+", "", name, flags=re.I)
     name = re.sub(r"^(?:formerly\s+known\s+as\s+)+", "", name, flags=re.I)
     name = re.sub(r"^id\s+", "", name, flags=re.I)
     name = _SPACE.sub(" ", name).strip(" .,-")
+    if name.isupper():
+        name = name.title()
     low = name.lower()
     if not name or low in {"private limited", "limited", "llp"} or any(
         skip in low for skip in ("telephone", "logo", "bse limited", "national stock", "stock exchange")
@@ -215,8 +221,7 @@ def _business(text: str) -> str:
     region = text[end:end + 4000]
     body = _business_body(region)
     body = re.sub(r"\s*For further (?:details|information), see\b.*$", "", body, flags=re.I)
-    body = re.sub(r"([A-Za-z])\d{1,2}\b", r"\1", body)
-    body = re.sub(r",\s*\d{1,2}\s+(?=[A-Za-z])", ", ", body)
+    body = re.sub(r"([A-Za-z]{3,})\d{1,2}\b", r"\1", body)
     body = re.sub(r"\s+\.", ".", body)
     body = _SPACE.sub(" ", body).strip()
     stop = max(body.rfind("."), body.rfind("!"))
@@ -282,38 +287,74 @@ def _crore(raw: str, unit: str) -> str:
 
 
 def _bankers(text: str) -> list[str]:
-    # The cover mentions the managers once in a risk paragraph and again in the actual table, just before the registrar.
+    """The cover names the managers in the table, and again in sentences that do not.
+
+    The table is the last mention before the registrar that actually contains a firm.
+    A parenthetical "formerly known as" is the previous name, not the firm.
+    """
     upper = text.upper()
     finish = len(text)
     for end in ("REGISTRAR TO THE ISSUE", "REGISTRAR TO THE OFFER"):
         at = upper.find(end)
         if 0 <= at < finish:
             finish = at
-    begin = upper.rfind("BOOK RUNNING LEAD", 0, finish)
-    block = "" if begin < 0 else text[begin:finish]
+    begin = finish
+    while True:
+        begin = upper.rfind("BOOK RUNNING LEAD", 0, begin)
+        if begin < 0:
+            return []
+        found = _banker_names(text[begin:finish])
+        if found:
+            return found[:8]
+
+
+def _banker_names(block: str) -> list[str]:
     found = []
     for part in re.split(r"E-?mail", block, flags=re.I):
+        part = re.sub(r"\(\s*formerly\b.*?\)", "", part, flags=re.I)
         names = _BANK.findall(part)
         if not names:
             continue
         name = _bank_name(names[-1])
         if name and name not in found:
             found.append(name)
-    return found[:8]
+    return found
 
 
 _SELLER_ROW = re.compile(
     r"(?:(Promoter Group|Promoter|Investor|Individual|Other)\s+)?"
-    r"Selling Shareholder\s+"
+    r"Selling Shareholders?\s+"
     r"(?:Up to\s+)?(\[●\]|[\d,]+)\s+Equity Shares"
     r"(?:\s+(?:of|bearing)\s+face\s+value\s+of\s+₹\s*[\d,.]+\s+each)?"
-    r"(?:.{0,80}?aggregating(?:\s+up)?\s+to\s+₹\s*([\d,]+(?:\.\d+)?)\s*(?:[\d.]+\s+)?(lakhs?|crores?|millions?))?"
+    r"(?:.{0,80}?aggregating(?:\s+up)?\s+to\s+₹\s*(\[●\]|[\d,]+(?:\.\d+)?)\s*(?:[\d.]+\s+)?(lakhs?|crores?|millions?))?"
     r"(?:\s+(?:Negligible#?|Nil|\d+\.\d+#?))?",
 )
 _NAME_CUT = re.compile(
     r"Negligible#?\s+|\bNil\s+|\d+\.\d+#?\s+|\(IN ₹\)\s*\*?\s*\^?\s*|#\s+|\*\s*(?=[A-Z])",
     re.I,
 )
+
+
+def _seller_name(name: str) -> str:
+    """The person or fund, without the column heading or the previous row's amount."""
+    name = _SPACE.sub(" ", name).strip(" ,;^#*")
+    if re.search(r"equity share|face value|weighted average|cost of acquisition|\bwaca\b", name, re.I):
+        name = re.sub(r"^.*\)\s*", "", name)
+        name = re.sub(
+            r"^.*\b(?:equity shares?|face value|weighted average|cost of acquisition|waca)\b\s*",
+            "",
+            name,
+            flags=re.I,
+        )
+    name = re.sub(
+        r"^.*aggregating(?:\s+up)?\s+to\s+₹\s*(?:\[●\]|[\d,.]+)\s*(?:lakhs?|crores?|millions?)?\s*(?:Negligible|Nil)?\^?\s*",
+        "",
+        name,
+        flags=re.I,
+    )
+    name = re.sub(r"^(?:Negligible|Nil)\s+", "", name, flags=re.I)
+    name = re.sub(r"^\d{1,3}\s+(?=[A-Z])", "", name)
+    return name.strip(" ,;^#*")
 
 
 def _sellers(text: str) -> list[str]:
@@ -365,8 +406,10 @@ def _sellers(text: str) -> list[str]:
             window,
             flags=re.I,
         )
-        name = window
-        if amount and unit:
+        name = _seller_name(window)
+        if (match.group(1) or "").lower() == "other" and (not name or "annexure" in name.lower()):
+            name = "Other shareholders"
+        if amount and unit and not amount.startswith("["):
             detail = _crore(amount, unit)
         elif shares.startswith("["):
             detail = "share count not stated"
@@ -378,18 +421,29 @@ def _sellers(text: str) -> list[str]:
 
 
 def _objects(text: str) -> list[str]:
-    start = text.upper().find("OBJECTS OF THE ISSUE")
+    start = -1
+    for match in re.finditer(r"objects of the (?:issue|offer)\b", text, re.I):
+        after = text[match.end():match.end() + 60]
+        if re.match(r"\s*(?:are|is|include|shall)\b", after, re.I):
+            continue
+        start = match.end()
+        break
     if start < 0:
         return []
     chunk = text[start:start + 1800]
-    finish = chunk.upper().find("PRE AND POST")
-    if finish > 0:
-        chunk = chunk[:finish]
+    stop = re.search(r"pre[\s-]*(?:issue|offer) and post|shareholding of our promoters", chunk, re.I)
+    if stop:
+        chunk = chunk[:stop.start()]
     objects = []
     for item in re.findall(r"\d+\.\s+(.*?)(?=\s+\d+\.\s+|\s+Total Net Proceeds|$)", chunk):
         item = re.sub(r"\s*\(?\d+\)?\s*$", "", item)
         item = re.sub(r"\s+[\d,.]+(?:\s*\[●\])?\s*$", "", item).strip(" .;")
-        if len(item) < 12 or item.lower().startswith("general corporate") or item in objects:
+        if (
+            len(item) < 12
+            or item.lower().startswith("general corporate")
+            or re.search(r"to be finali[sz]ed upon determination", item, re.I)
+            or item in objects
+        ):
             continue
         objects.append(item[:160])
         if len(objects) == 3:

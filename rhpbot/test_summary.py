@@ -1,6 +1,6 @@
 import unittest
 
-from rhpbot.summary import _bank_name, _sellers, render, summarize
+from rhpbot.summary import _bank_name, _bankers, _sellers, render, summarize
 
 COVER = """
 NAME OF OUR PROMOTER: AMBER ENTERPRISES INDIA LIMITED
@@ -264,6 +264,115 @@ class SummaryTests(unittest.TestCase):
         fields = summarize("IN THE NATURE OF AN ABRIDGED PROSPECTUS " + ("cover " * 40) + COVER)
         self.assertEqual(fields["fresh"], "₹2,500 crore")
         self.assertEqual(fields["ofs"], "none")
+
+    def test_seller_name_drops_a_column_heading_and_a_page_number(self):
+        names = _sellers(
+            "(IN ₹ PER EQUITY SHARE OF FACE VALUE OF ₹10 EACH) Inamulhaq Shamsulhaq Iraki "
+            "Promoter Selling Shareholder Up to 5,00,000 Equity Shares of face value of ₹10 each aggregating up to ₹[●] lakhs "
+            "2 Ankit Kumar Promoter Selling Shareholder Up to 1,600 Equity Shares aggregating up to ₹[●] million"
+        )
+        self.assertEqual(
+            names,
+            [
+                "Inamulhaq Shamsulhaq Iraki (up to 5,00,000 shares)",
+                "Ankit Kumar (up to 1,600 shares)",
+            ],
+        )
+
+    def test_a_placeholder_amount_does_not_become_the_next_seller(self):
+        names = _sellers(
+            "Arvind Kondangi Lakshmikumar Promoter Selling Shareholder Up to 1,150,000 Equity Shares "
+            "aggregating to ₹[●] million Nil "
+            "Ankit Kumar Promoter Selling Shareholder Up to 580,000 Equity Shares aggregating to ₹[●] million"
+        )
+        self.assertEqual(
+            names,
+            [
+                "Arvind Kondangi Lakshmikumar (up to 1,150,000 shares)",
+                "Ankit Kumar (up to 580,000 shares)",
+            ],
+        )
+
+    def test_banker_table_is_used_when_a_later_mention_has_no_firm(self):
+        text = (
+            "BOOK RUNNING LEAD MANAGER Name Contact E-mail "
+            "Beeline Capital Advisors Private Limited E-mail: ipo@beeline.com "
+            "in consultation with the Book Running Lead Manager at https://beelinemb.com/ "
+            "REGISTRAR TO THE ISSUE"
+        )
+        self.assertEqual(_bankers(text), ["Beeline Capital Advisors Private Limited"])
+
+    def test_current_bank_name_is_kept_when_the_old_name_is_in_parentheses(self):
+        text = (
+            "BOOK RUNNING LEAD MANAGERS "
+            "IIFL Capital Services Limited (formerly known as IIFL Securities Limited) E-mail: a@b.com "
+            "REGISTRAR TO THE ISSUE"
+        )
+        self.assertEqual(_bankers(text), ["IIFL Capital Services Limited"])
+
+    def test_objects_stop_before_the_shareholding_table(self):
+        fields = summarize(
+            "Objects of the Issue "
+            "1. Funding working capital requirements of our Company 1,000.00 "
+            "5. Pre-Issue and Post-Issue shareholding of our Promoters Rajnikant 22,440,000"
+        )
+        self.assertIn("working capital", fields["objects"])
+        self.assertNotIn("Rajnikant", fields["objects"])
+
+    def test_objects_stop_before_a_pre_offer_shareholding_table(self):
+        fields = summarize(
+            "Objects of the Offer "
+            "1. Repayment of borrowings availed by our Company 500.00 "
+            "2. Pre-Offer and Post-Offer shareholding of our Promoters"
+        )
+        self.assertIn("Repayment", fields["objects"])
+        self.assertNotIn("shareholding", fields["objects"])
+
+    def test_an_unset_price_note_is_not_an_object(self):
+        fields = summarize(
+            "Objects of the Offer "
+            "1. Funding capital expenditure for a manufacturing facility 100.00 "
+            "2. To be finalised upon determination of the Offer Price and updated in the Prospectus"
+        )
+        self.assertIn("manufacturing", fields["objects"])
+        self.assertNotIn("finalised", fields["objects"])
+
+    def test_a_real_number_in_the_description_is_kept(self):
+        fields = summarize(
+            "Summary of the primary business We sell coal across grades from G3 to G16. "
+            "We have 19 Completed Projects, 28 Ongoing Projects and 33 Upcoming Projects. "
+            "a. Business overview Products."
+        )
+        self.assertIn("G3 to G16", fields["business"])
+        self.assertIn("28 Ongoing", fields["business"])
+
+    def test_an_all_caps_bank_name_and_a_grouped_seller_row(self):
+        banks = _bankers(
+            "BOOK RUNNING LEAD MANAGER Name of Book Running Lead Manager Contact Person Email and Telephone "
+            "BEELINE CAPITAL ADVISORS PRIVATE LIMITED Nikhil Shah Email: mb@beelinemb.com "
+            "REGISTRAR TO THE ISSUE"
+        )
+        self.assertEqual(banks, ["Beeline Capital Advisors Private Limited"])
+        names = _sellers(
+            "See Annexure A Other Selling Shareholders Up to 18,98,400 Equity Shares of face value of ₹5 each "
+            "aggregating up to ₹[●] lakhs"
+        )
+        self.assertEqual(names, ["Other shareholders (up to 18,98,400 shares)"])
+
+    def test_a_website_in_the_email_is_not_part_of_the_next_firm(self):
+        banks = _bankers(
+            "BOOK RUNNING LEAD MANAGERS SBI Capital Markets Limited Tel: +91 22 4006 9807 "
+            "E-mail: secl.ipo@sbicaps.com ICICI Securities Limited Tel: +91 22 6807 7100 "
+            "E-mail: secl.ipo@icicisecurities.com REGISTRAR TO THE OFFER"
+        )
+        self.assertEqual(banks, ["SBI Capital Markets Limited", "ICICI Securities Limited"])
+
+    def test_a_former_name_without_known_as_is_not_the_firm(self):
+        banks = _bankers(
+            "BOOK RUNNING LEAD MANAGER IIFL Capital Services Limited (formerly IIFL Securities Limited) "
+            "E-mail: hdfire.ipo@iiflcap.com REGISTRAR TO THE OFFER"
+        )
+        self.assertEqual(banks, ["IIFL Capital Services Limited"])
 
     def test_bank_name_drops_the_email_header(self):
         self.assertEqual(_bank_name("AND E- MAIL SBI Capital Markets Limited"), "SBI Capital Markets Limited")
