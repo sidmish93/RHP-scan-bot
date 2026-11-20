@@ -367,6 +367,17 @@ class SummaryTests(unittest.TestCase):
         self.assertIn("https://sebi.example/a", body)
         self.assertNotIn("Objects", body)
 
+    def test_message_includes_the_full_prospectus_link(self):
+        body = render(
+            "DRHP",
+            "Acme Limited",
+            "19 Nov 2026",
+            {"fresh": "₹100 crore"},
+            "https://www.sebi.gov.in/filings/acme.html",
+            "https://www.sebi.gov.in/sebi_data/attachdocs/acme.pdf",
+        )
+        self.assertIn("https://www.sebi.gov.in/sebi_data/attachdocs/acme.pdf", body)
+
 
 if __name__ == "__main__":
     unittest.main()

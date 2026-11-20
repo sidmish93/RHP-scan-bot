@@ -133,20 +133,18 @@ def _prepare(filing: Filing) -> tuple[str, list[tuple[str, bytes]]]:
         print(f"page skipped: {exc}", flush=True)
     fields: dict[str, str] = {}
     files: list[tuple[str, bytes]] = []
-    source = current.abridged or current.full
-    if source:
+    if current.abridged:
         try:
-            data = _download(source)
-            fields = summarize(_pdf_text(data, full=not current.abridged))
-            if current.abridged:
-                files.append((_filename(current, "abridged"), data))
+            data = _download(current.abridged)
+            fields = summarize(_pdf_text(data, full=False))
+            files.append((_filename(current, "abridged"), data))
+        except Exception as exc:
+            print(f"abridged skipped: {exc}", flush=True)
+    if not fields and current.full:
+        try:
+            fields = summarize(_pdf_text(_download(current.full), full=True))
         except Exception as exc:
             print(f"summary skipped: {exc}", flush=True)
-    if current.full and current.full != current.abridged:
-        try:
-            files.append((_filename(current, "prospectus"), _download(current.full)))
-        except Exception as exc:
-            print(f"prospectus skipped: {exc}", flush=True)
     text = render(current.kind, current.company, current.filed, fields, current.page, current.full)
     return text, files
 
