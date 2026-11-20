@@ -1,6 +1,6 @@
 import unittest
 
-from rhpbot.bot import _apply_group_event, _group_event
+from rhpbot.bot import _apply_group_event, _group_event, _migrated_chat_id, _replace_chat
 
 
 def _join(chat_id: int, status: str = "administrator") -> dict:
@@ -36,3 +36,13 @@ class GroupEventTests(unittest.TestCase):
         self.assertEqual(_apply_group_event(state, event), "removed")
         self.assertEqual(state["chats"], [1927167176])
         self.assertEqual(state["welcomed"], [1927167176])
+
+    def test_an_upgraded_group_keeps_one_id(self):
+        exc = RuntimeError(
+            'sendMessage 400 {"parameters":{"migrate_to_chat_id":-1003923114626}}'
+        )
+        self.assertEqual(_migrated_chat_id(exc), -1003923114626)
+        state = {"chats": [1927167176, -5313911239, -1003923114626], "welcomed": [1927167176, -5313911239]}
+        _replace_chat(state, -5313911239, -1003923114626)
+        self.assertEqual(state["chats"], [1927167176, -1003923114626])
+        self.assertEqual(state["welcomed"], [1927167176, -1003923114626])
