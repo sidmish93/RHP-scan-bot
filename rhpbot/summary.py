@@ -229,15 +229,29 @@ def _bankers(text: str) -> list[str]:
 
 def _sellers(text: str) -> list[str]:
     found = []
-    patterns = (
+    seen = set()
+
+    def add(name: str) -> None:
+        name = _SPACE.sub(" ", name).strip(" ,;")
+        key = name.lower()
+        if name and key not in seen:
+            seen.add(key)
+            found.append(name)
+
+    for name in re.findall(
         r"([A-Z][A-Za-z0-9&.,'’\- ]{2,70}?)\s+\((?:the\s+)?[\"“]?Selling Shareholder",
-        r"((?:[A-Z][A-Za-z0-9&.'’\-]*\s+){1,8}?(?:Limited|Ltd\.?|LLP))\s+(?:Promoter\s+)?Selling Shareholder",
-    )
-    for pattern in patterns:
-        for name in re.findall(pattern, text):
-            name = _SPACE.sub(" ", name).strip(" ,;")
-            if name and name not in found:
-                found.append(name)
+        text,
+    ):
+        add(name)
+    # Cover table: "Name  Promoter / Promoter Group / Investor Selling Shareholder  Up to N Equity Shares".
+    for name, shares in re.findall(
+        r"((?:[A-Z][A-Za-z0-9&.'’\-/]*\.?\s+){1,10})"
+        r"(?:Promoter Group|Promoter|Investor|Other)\s+Selling Shareholder\s+"
+        r"Up to\s+([\d,]+)\s+Equity Shares",
+        text,
+    ):
+        name = re.sub(r"^.*\bSELLING SHAREHOLDERS?\s+", "", name, flags=re.I).strip()
+        add(f"{name} (up to {shares} shares)")
     return found[:8]
 
 

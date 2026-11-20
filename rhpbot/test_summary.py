@@ -1,6 +1,6 @@
 import unittest
 
-from rhpbot.summary import _bank_name, render, summarize
+from rhpbot.summary import _bank_name, _sellers, render, summarize
 
 COVER = """
 NAME OF OUR PROMOTER: AMBER ENTERPRISES INDIA LIMITED
@@ -58,6 +58,28 @@ class SummaryTests(unittest.TestCase):
         fields = summarize(text)
         self.assertIn("Alpha Capital", fields["sellers"])
         self.assertNotEqual(fields["ofs"], "none")
+
+    def test_selling_shareholder_table_includes_trusts_people_and_investors(self):
+        text = """
+        NAME OF THE SELLING SHAREHOLDERS TYPE OF SELLING SHAREHOLDER
+        Shree Hari Trust Promoter Selling Shareholder Up to 2,700,000 Equity Shares of face value of ₹1 each
+        Dhirajkumar Savjibhai Vasoya Promoter Group Selling Shareholder Up to 2,000,000 Equity Shares of face value of ₹1 each
+        Samara Capital Markets Holding Limited Investor Selling Shareholder Up to 6,479,063 Equity Shares of face value of ₹1 each
+        Kotak Pre-IPO Opportunities Fund Investor Selling Shareholder Up to 1,307,875 Equity Shares of face value of ₹1 each
+        NHPEA Sparkle Holding B.V. Investor Selling Shareholder Up to 1,335,178 Equity Shares of face value of ₹1 each
+        Each of the Selling Shareholders accepts responsibility
+        """
+        names = _sellers(text)
+        self.assertEqual(
+            names,
+            [
+                "Shree Hari Trust (up to 2,700,000 shares)",
+                "Dhirajkumar Savjibhai Vasoya (up to 2,000,000 shares)",
+                "Samara Capital Markets Holding Limited (up to 6,479,063 shares)",
+                "Kotak Pre-IPO Opportunities Fund (up to 1,307,875 shares)",
+                "NHPEA Sparkle Holding B.V. (up to 1,335,178 shares)",
+            ],
+        )
 
     def test_placeholder_offer_for_sale_keeps_the_share_count(self):
         fields = summarize(PLACEHOLDER)
