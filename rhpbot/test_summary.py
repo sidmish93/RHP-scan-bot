@@ -50,7 +50,7 @@ class SummaryTests(unittest.TestCase):
         self.assertNotIn("promoter", fields)
         self.assertIn("Axis Capital Limited", fields["bankers"])
         self.assertEqual(fields["sellers"], "none")
-        self.assertIn("Repayment", fields["objects"])
+        self.assertNotIn("objects", fields)
 
     def test_selling_shareholders(self):
         text = COVER.replace("Not applicable", "aggregating up to ₹10,000.00 lakhs")
@@ -310,33 +310,6 @@ class SummaryTests(unittest.TestCase):
         )
         self.assertEqual(_bankers(text), ["IIFL Capital Services Limited"])
 
-    def test_objects_stop_before_the_shareholding_table(self):
-        fields = summarize(
-            "Objects of the Issue "
-            "1. Funding working capital requirements of our Company 1,000.00 "
-            "5. Pre-Issue and Post-Issue shareholding of our Promoters Rajnikant 22,440,000"
-        )
-        self.assertIn("working capital", fields["objects"])
-        self.assertNotIn("Rajnikant", fields["objects"])
-
-    def test_objects_stop_before_a_pre_offer_shareholding_table(self):
-        fields = summarize(
-            "Objects of the Offer "
-            "1. Repayment of borrowings availed by our Company 500.00 "
-            "2. Pre-Offer and Post-Offer shareholding of our Promoters"
-        )
-        self.assertIn("Repayment", fields["objects"])
-        self.assertNotIn("shareholding", fields["objects"])
-
-    def test_an_unset_price_note_is_not_an_object(self):
-        fields = summarize(
-            "Objects of the Offer "
-            "1. Funding capital expenditure for a manufacturing facility 100.00 "
-            "2. To be finalised upon determination of the Offer Price and updated in the Prospectus"
-        )
-        self.assertIn("manufacturing", fields["objects"])
-        self.assertNotIn("finalised", fields["objects"])
-
     def test_a_real_number_in_the_description_is_kept(self):
         fields = summarize(
             "Summary of the primary business We sell coal across grades from G3 to G16. "
@@ -382,9 +355,17 @@ class SummaryTests(unittest.TestCase):
         )
 
     def test_message_includes_the_sebi_page(self):
-        body = render("DRHP", "Acme Limited", "19 Nov 2026", {"fresh": "₹100 crore"}, "https://sebi.example/a", "")
+        body = render(
+            "DRHP",
+            "Acme Limited",
+            "19 Nov 2026",
+            {"fresh": "₹100 crore", "objects": "Repayment of borrowings"},
+            "https://sebi.example/a",
+            "",
+        )
         self.assertIn("DRHP · Acme Limited", body)
         self.assertIn("https://sebi.example/a", body)
+        self.assertNotIn("Objects", body)
 
 
 if __name__ == "__main__":

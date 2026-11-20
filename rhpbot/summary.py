@@ -51,10 +51,6 @@ def summarize(text: str) -> dict[str, str]:
     business = _business(collapsed)
     if business:
         fields["business"] = business
-
-    objects = _objects(collapsed)
-    if objects:
-        fields["objects"] = " · ".join(objects)
     return fields
 
 
@@ -80,9 +76,6 @@ def render(kind: str, company: str, filed: str, fields: dict[str, str], page: st
     if "business" in fields:
         lines.append("")
         lines.append("Business: " + fields["business"])
-    if "objects" in fields:
-        lines.append("")
-        lines.append("Objects: " + fields["objects"])
     lines.append("")
     lines.append(page)
     if full and full != page:
@@ -419,33 +412,3 @@ def _sellers(text: str) -> list[str]:
         previous = match.end()
     return found[:12]
 
-
-def _objects(text: str) -> list[str]:
-    start = -1
-    for match in re.finditer(r"objects of the (?:issue|offer)\b", text, re.I):
-        after = text[match.end():match.end() + 60]
-        if re.match(r"\s*(?:are|is|include|shall)\b", after, re.I):
-            continue
-        start = match.end()
-        break
-    if start < 0:
-        return []
-    chunk = text[start:start + 1800]
-    stop = re.search(r"pre[\s-]*(?:issue|offer) and post|shareholding of our promoters", chunk, re.I)
-    if stop:
-        chunk = chunk[:stop.start()]
-    objects = []
-    for item in re.findall(r"\d+\.\s+(.*?)(?=\s+\d+\.\s+|\s+Total Net Proceeds|$)", chunk):
-        item = re.sub(r"\s*\(?\d+\)?\s*$", "", item)
-        item = re.sub(r"\s+[\d,.]+(?:\s*\[●\])?\s*$", "", item).strip(" .;")
-        if (
-            len(item) < 12
-            or item.lower().startswith("general corporate")
-            or re.search(r"to be finali[sz]ed upon determination", item, re.I)
-            or item in objects
-        ):
-            continue
-        objects.append(item[:160])
-        if len(objects) == 3:
-            break
-    return objects
