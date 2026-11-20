@@ -10,12 +10,13 @@ _BANK = re.compile(r"([A-Z][A-Za-z0-9&.,'’\-()][A-Za-z0-9&.,'’\-() ]{2,80}?(
 # The rupee amount may still be the unset placeholder [●].
 _SIZE = re.compile(
     r"(?:(?:fresh issue(?:\s+and\s+offer\s+for\s+sale)?|offer\s+for\s+sale)\s+of\s+)?"
-    r"up\s+to\s+(?P<shares>\[(?:●|•)\]|[\d,]+)\s+equity\s+shares"
-    r"(?:\s+of\s+face\s+value\s+of\s+₹\s*(?P<face>[\d,.]+)\s+each)?"
-    r"\s+aggregating\s+up\s+to\s+₹\s*(?P<amount>\[(?:●|•)\]|[\d,]+(?:\.\d+)?)\s*"
+    r"(?:up\s+to\s+)?(?P<shares>\[(?:●|•)\]|[\d,]+)\s+equity\s+shares"
+    r"(?:\s+(?:of|bearing)\s+face\s+value\s+of\s+₹\s*(?P<face>[\d,.]+)\s+each)?"
+    r".{0,180}?"
+    r"aggregating(?:\s+up)?\s+to\s+₹\s*(?P<amount>\[(?:●|•)\]|[\d,]+(?:\.\d+)?)\s*"
     r"(?P<unit>lakhs?|crores?|millions?)"
     r"|(?P<na>\bnot\s+applicable\b)"
-    r"|aggregating\s+up\s+to\s+₹\s*(?P<only>[\d,]+(?:\.\d+)?)\s*(?P<only_unit>lakhs?|crores?|millions?)",
+    r"|aggregating(?:\s+up)?\s+to\s+₹\s*(?P<only>[\d,]+(?:\.\d+)?)\s*(?P<only_unit>lakhs?|crores?|millions?)",
     re.I,
 )
 
@@ -23,7 +24,10 @@ _SIZE = re.compile(
 def summarize(text: str) -> dict[str, str]:
     """Pull the fields that fit in a phone message. Missing fields are omitted."""
     collapsed = _SPACE.sub(" ", text or "").strip()
-    cover = collapsed.split("IN THE NATURE OF", 1)[0][:6000]
+    # Some abridged covers print "in the nature of" as a header before the issue table.
+    nature = collapsed.upper().find("IN THE NATURE OF")
+    cover = collapsed[:nature] if nature > 1500 else collapsed
+    cover = cover[:8000]
     fields: dict[str, str] = {}
 
     fields.update(_issue(cover))
@@ -43,6 +47,8 @@ def summarize(text: str) -> dict[str, str]:
     )
     if not promoter:
         promoter = re.search(r"PROMOTERS OF OUR COMPANY ARE\s+(.+?)\s+DETAILS OF", cover, re.I)
+    if not promoter:
+        promoter = re.search(r"OUR PROMOTERS?\s*:\s*(.+?)\s+DETAILS OF", cover, re.I)
     if promoter:
         fields["promoter"] = _SPACE.sub(" ", promoter.group(1)).strip(" .:-")
 
@@ -108,7 +114,16 @@ def _issue(cover: str) -> dict[str, str]:
     """
     upper = cover.upper()
     begin = -1
-    for marker in ("DETAILS OF THE OFFER TO THE PUBLIC", "DETAILS OF THE ISSUE TO THE PUBLIC", "DETAILS OF ISSUE", "DETAILS OF THE OFFER", "FRESH ISSUE"):
+    for marker in (
+        "DETAILS OF THE OFFER TO THE PUBLIC",
+        "DETAILS OF THE ISSUE TO THE PUBLIC",
+        "DETAILS OF THE ISSUE TO PUBLIC",
+        "DETAILS OF THE ISSUE OF THE EQUITY",
+        "DETAILS OF THE ISSUE",
+        "DETAILS OF ISSUE",
+        "DETAILS OF THE OFFER",
+        "FRESH ISSUE",
+    ):
         begin = upper.find(marker)
         if begin >= 0:
             break
@@ -164,6 +179,8 @@ def _size_text(match: re.Match) -> str:
 def _bank_name(raw: str) -> str:
     name = re.sub(r"^.*(?:TELEPHONE|LOGO|CONTACT PERSON)\s+", "", raw, flags=re.I)
     name = re.sub(r"^(?:.*\b)?(?:and\s+)?e-\s*mail\s+", "", name, flags=re.I)
+    name = re.sub(r"^(?:formerly\s+known\s+as\s+)+", "", name, flags=re.I)
+    name = re.sub(r"^id\s+", "", name, flags=re.I)
     name = _SPACE.sub(" ", name).strip(" .,-")
     low = name.lower()
     if not name or low in {"private limited", "limited", "llp"} or any(
@@ -200,8 +217,10 @@ def _crore(raw: str, unit: str) -> str:
         value /= 100
     elif low.startswith("million"):
         value /= 10
-    if value >= 100:
+    if value >= 100 and abs(value - round(value)) < 0.05:
         return f"₹{value:,.0f} crore"
+    if value >= 100:
+        return f"₹{value:,.2f} crore"
     text = f"{value:,.2f}".rstrip("0").rstrip(".")
     return f"₹{text} crore"
 
@@ -233,25 +252,36 @@ def _sellers(text: str) -> list[str]:
 
     def add(name: str) -> None:
         name = _SPACE.sub(" ", name).strip(" ,;")
-        key = name.lower()
-        if name and key not in seen:
-            seen.add(key)
-            found.append(name)
+        name = re.sub(r"^(?:Negligible|Nil)\s+", "", name)
+        name = re.sub(r"^.*\bSELLING SHAREHOLDERS?\s+", "", name, flags=re.I).strip(" ,;")
+        key = name.lower().rstrip(".")
+        if not name or key in {"ltd", "limited", "llp", "llc", "lp", "investor", "promoter", "other", "promoter group", "dr"} or key in seen:
+            return
+        seen.add(key)
+        found.append(name)
 
     for name in re.findall(
         r"([A-Z][A-Za-z0-9&.,'’\- ]{2,70}?)\s+\((?:the\s+)?[\"“]?Selling Shareholder",
         text,
     ):
         add(name)
-    # Cover table: "Name  Promoter / Promoter Group / Investor Selling Shareholder  Up to N Equity Shares".
-    for name, shares in re.findall(
-        r"((?:[A-Z][A-Za-z0-9&.'’\-/]*\.?\s+){1,10})"
-        r"(?:Promoter Group|Promoter|Investor|Other)\s+Selling Shareholder\s+"
-        r"Up to\s+([\d,]+)\s+Equity Shares",
-        text,
-    ):
-        name = re.sub(r"^.*\bSELLING SHAREHOLDERS?\s+", "", name, flags=re.I).strip()
-        add(f"{name} (up to {shares} shares)")
+    # "Name [Promoter / Promoter Group / Investor] Selling Shareholder [Up to] N Equity Shares".
+    row = re.compile(
+        r"((?:[A-Z][A-Za-z0-9&.'’\-/]*\.?\s+){1,12}?)"
+        r"(?:(?:Promoter Group|Promoter|Investor|Other)\s+)?"
+        r"Selling Shareholder\s+"
+        r"(?:Up to\s+)?(\[●\]|[\d,]+)\s+Equity Shares"
+        r"(?:\s+(?:of|bearing)\s+face\s+value\s+of\s+₹\s*[\d,.]+\s+each)?"
+        r"(?:.{0,60}?aggregating(?:\s+up)?\s+to\s+₹\s*([\d,]+(?:\.\d+)?)\s*(?:[\d.]+\s+)?(lakhs?|crores?|millions?))?",
+    )
+    for name, shares, amount, unit in row.findall(text):
+        if amount and unit:
+            detail = _crore(amount, unit)
+        elif shares.startswith("["):
+            detail = "share count not stated"
+        else:
+            detail = f"up to {shares} shares"
+        add(f"{name.strip()} ({detail})")
     return found[:8]
 
 

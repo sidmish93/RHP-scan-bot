@@ -59,6 +59,48 @@ class SummaryTests(unittest.TestCase):
         self.assertIn("Alpha Capital", fields["sellers"])
         self.assertNotEqual(fields["ofs"], "none")
 
+    def test_price_clause_and_plain_selling_shareholder(self):
+        text = """
+        OUR PROMOTER: RELIANCE INDUSTRIES LIMITED
+        DETAILS OF THE ISSUE TO THE PUBLIC
+        TYPE FRESH ISSUE SIZE OFFER FOR SALE SIZE TOTAL ISSUE SIZE ELIGIBILITY
+        Fresh Issue Up to 270,000,000 Equity Shares of face value of ₹10 each for cash at a price of ₹[●] each aggregating up to ₹[●] million
+        Not applicable Up to 270,000,000 Equity Shares of face value of ₹10 each aggregating up to ₹[●] million
+        The Issue is being made pursuant to Regulation 6(1)
+        """
+        fields = summarize(text)
+        self.assertEqual(fields["fresh"], "up to 270,000,000 equity shares of face value ₹10 each, aggregating up to ₹[●] million")
+        self.assertEqual(fields["ofs"], "none")
+        self.assertEqual(fields["sellers"], "none")
+        self.assertIn("RELIANCE INDUSTRIES LIMITED", fields["promoter"])
+
+    def test_seller_without_a_promoter_label_and_a_rupee_amount(self):
+        names = _sellers(
+            "Alok Kumar Singh Selling Shareholder Up to 63,762,500 Equity Shares of face value of ₹1 each aggregating up to ₹[●] million "
+            "Negligible Rahul Anand Promoter Selling Shareholder [●] Equity Shares of face value of ₹10 each aggregating up to ₹1,510.00 million"
+        )
+        self.assertEqual(
+            names,
+            [
+                "Alok Kumar Singh (up to 63,762,500 shares)",
+                "Rahul Anand (₹151 crore)",
+            ],
+        )
+
+    def test_total_uses_aggregating_to(self):
+        text = """
+        DETAILS OF THE OFFER TO THE PUBLIC
+        TYPE FRESH ISSUE SIZE OFFER FOR SALE SIZE TOTAL OFFER SIZE ELIGIBILITY
+        Fresh Issue and Offer for Sale Up to [●] Equity Shares of face value of ₹1 each aggregating up to ₹3,200.00 million
+        Up to [●] Equity Shares of face value of ₹1 each aggregating up to ₹2,320.00 million
+        Up to [●] Equity Shares of face value of ₹1 each aggregating to ₹5,520.00 million
+        The Offer is being made pursuant to Regulation 6(1)
+        """
+        fields = summarize(text)
+        self.assertEqual(fields["fresh"], "₹320 crore")
+        self.assertEqual(fields["ofs"], "₹232 crore")
+        self.assertEqual(fields["total"], "₹552 crore")
+
     def test_selling_shareholder_table_includes_trusts_people_and_investors(self):
         text = """
         NAME OF THE SELLING SHAREHOLDERS TYPE OF SELLING SHAREHOLDER
@@ -120,6 +162,10 @@ class SummaryTests(unittest.TestCase):
 
     def test_bank_name_drops_the_email_header(self):
         self.assertEqual(_bank_name("AND E- MAIL SBI Capital Markets Limited"), "SBI Capital Markets Limited")
+        self.assertEqual(
+            _bank_name("Id Smart Horizon Capital Advisors Private Limited"),
+            "Smart Horizon Capital Advisors Private Limited",
+        )
 
     def test_message_includes_the_sebi_page(self):
         body = render("DRHP", "Acme Limited", "19 Nov 2026", {"fresh": "₹100 crore"}, "https://sebi.example/a", "")
