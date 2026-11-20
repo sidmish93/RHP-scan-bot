@@ -72,6 +72,18 @@ class SummaryTests(unittest.TestCase):
         self.assertIn("Kotak Mahindra Capital Company Limited", fields["bankers"])
         self.assertIn("J.P. Morgan India Private Limited", fields["bankers"])
 
+    def test_business_description_is_not_cut_off(self):
+        paragraph = (
+            "We are an alcoholic beverage company that offers a portfolio of quality internationally "
+            "recognized beer brands in India. We have approximately two decades of presence in India "
+            "and are part of the Carlsberg Group, which has a 178-year legacy in the global alcobev "
+            "industry. We are one of India's fastest growing1 alcobev companies by revenue CAGR from "
+            "FY2024 to FY2026 (source: CRISIL Report)."
+        )
+        fields = summarize("Business overview " + paragraph + " b. Industries served and typical customers")
+        self.assertEqual(fields["business"], paragraph.replace("growing1", "growing"))
+        self.assertNotIn("...", fields["business"])
+
     def test_bank_name_drops_the_email_header(self):
         self.assertEqual(_bank_name("AND E- MAIL SBI Capital Markets Limited"), "SBI Capital Markets Limited")
 

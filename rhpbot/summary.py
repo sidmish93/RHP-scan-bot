@@ -89,7 +89,7 @@ def render(kind: str, company: str, filed: str, fields: dict[str, str], page: st
         lines.append(f"Selling shareholders: {fields['sellers']}")
     if "business" in fields:
         lines.append("")
-        lines.append(fields["business"])
+        lines.append("Business: " + fields["business"])
     if "objects" in fields:
         lines.append("")
         lines.append("Objects: " + fields["objects"])
@@ -183,15 +183,23 @@ def _bank_name(raw: str) -> str:
 
 
 def _business(text: str) -> str:
+    """The opening business description, through the last sentence before the next subsection."""
     anchor = text.upper().find("BUSINESS OVERVIEW")
-    region = text[anchor:anchor + 900] if anchor >= 0 else ""
-    match = re.search(r"\bWe are\s+\S.{40,520}", region)
-    if not match:
+    if anchor < 0:
         return ""
-    sentence = match.group(0).strip()
-    if len(sentence) > 280:
-        sentence = sentence[:277].rsplit(" ", 1)[0] + "..."
-    return sentence
+    region = text[anchor:anchor + 4000]
+    start = re.search(r"\b(?:We are|Our Company is|The Company is)\b", region)
+    if not start:
+        return ""
+    body = region[start.start():]
+    stop = re.search(r"\s+[b-e][\.\)]\s+|\s+Set out below\b|\s+The following table\b", body, re.I)
+    if stop:
+        body = body[:stop.start()]
+    body = re.sub(r"([A-Za-z])\d{1,2}\b", r"\1", body)
+    body = _SPACE.sub(" ", body).strip()
+    if len(body) > 1800:
+        body = body[:1800].rsplit(". ", 1)[0] + "."
+    return body
 
 
 def _crore(raw: str, unit: str) -> str:
