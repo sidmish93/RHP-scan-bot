@@ -211,6 +211,8 @@ def _filename(filing: Filing, label: str) -> str:
 
 def _broadcast(token: str, state: dict, text: str, files: list[tuple[str, bytes]]) -> None:
     for chat_id in list(state["chats"]):
+        if chat_id not in state["chats"]:
+            continue
         target = chat_id
         try:
             _send(token, target, text)
@@ -219,9 +221,12 @@ def _broadcast(token: str, state: dict, text: str, files: list[tuple[str, bytes]
             if moved is None:
                 print(f"send to {chat_id} failed: {_redact(exc, token)}", flush=True)
                 continue
+            already = moved in state["chats"]
             _replace_chat(state, chat_id, moved)
-            target = moved
             print(f"group {chat_id} moved to {moved}", flush=True)
+            if already:
+                continue
+            target = moved
             try:
                 _send(token, target, text)
             except RuntimeError as exc2:
@@ -392,11 +397,14 @@ def _note_group(token: str, state: dict, chat_id: int, note: str) -> None:
 def _settle_groups(token: str, state: dict) -> None:
     """Drop a basic group id after Telegram upgrades that group to a supergroup."""
     for chat_id in list(state["chats"]):
+        if chat_id >= 0 or str(chat_id).startswith("-100"):
+            continue
         try:
-            _api(token, "getChat", {"chat_id": chat_id})
+            _api(token, "sendChatAction", {"chat_id": chat_id, "action": "typing"})
         except RuntimeError as exc:
             moved = _migrated_chat_id(exc)
             if moved is None:
+                print(f"group {chat_id} skipped: {_redact(exc, token)}", flush=True)
                 continue
             _replace_chat(state, chat_id, moved)
             print(f"group {chat_id} moved to {moved}", flush=True)
