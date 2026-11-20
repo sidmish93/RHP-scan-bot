@@ -1,0 +1,50 @@
+name: RHP filings
+
+# SEBI posts draft and red herring documents outside market hours.
+# Ten minutes is enough for a filing alert. GitHub will not schedule
+# anything shorter than five, and a public repository is not billed.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: rhp-scan
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install PDF reader
+        run: pip install -r requirements.txt
+
+      - name: Poll SEBI filings
+        env:
+          RHP_BOT_TOKEN: ${{ secrets.RHP_BOT_TOKEN }}
+          RHP_CHAT_ID: ${{ secrets.RHP_CHAT_ID }}
+        run: python -m rhpbot.bot --once
+
+      - name: Persist seen filings
+        run: |
+          date -u +%Y-%m-%d > rhpbot/state/heartbeat.txt
+          if [ -n "$(git status --porcelain rhpbot/state)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add rhpbot/state
+            git commit -m "RHP bot state: $(date -u +%Y-%m-%d\ %H:%M) UTC [skip ci]"
+            for attempt in 1 2 3; do
+              git pull --rebase --autostash -q && git push -q && break
+              sleep 5
+            done
+          fi
