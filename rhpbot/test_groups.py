@@ -1,6 +1,7 @@
+import os
 import unittest
 
-from rhpbot.bot import _apply_group_event, _group_event, _migrated_chat_id, _replace_chat
+from rhpbot.bot import _apply_group_event, _ensure_chat, _group_event, _groups_only, _migrated_chat_id, _replace_chat
 
 
 def _join(chat_id: int, status: str = "administrator") -> dict:
@@ -46,3 +47,22 @@ class GroupEventTests(unittest.TestCase):
         _replace_chat(state, -5313911239, -1003923114626)
         self.assertEqual(state["chats"], [1927167176, -1003923114626])
         self.assertEqual(state["welcomed"], [1927167176, -1003923114626])
+
+    def test_personal_chat_is_removed(self):
+        state = {"chats": [1927167176, -1003923114626], "welcomed": [1927167176, -1003923114626]}
+        _groups_only(state)
+        self.assertEqual(state["chats"], [-1003923114626])
+        self.assertEqual(state["welcomed"], [-1003923114626])
+
+    def test_personal_secret_is_not_restored(self):
+        state = {"chats": [-1003923114626], "welcomed": [-1003923114626]}
+        previous = os.environ.get("RHP_CHAT_ID")
+        os.environ["RHP_CHAT_ID"] = "1927167176"
+        try:
+            _ensure_chat(state)
+        finally:
+            if previous is None:
+                os.environ.pop("RHP_CHAT_ID", None)
+            else:
+                os.environ["RHP_CHAT_ID"] = previous
+        self.assertEqual(state["chats"], [-1003923114626])

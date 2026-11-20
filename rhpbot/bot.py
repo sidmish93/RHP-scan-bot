@@ -210,6 +210,7 @@ def _filename(filing: Filing, label: str) -> str:
 
 
 def _broadcast(token: str, state: dict, text: str, files: list[tuple[str, bytes]]) -> None:
+    _groups_only(state)
     for chat_id in list(state["chats"]):
         if chat_id not in state["chats"]:
             continue
@@ -438,11 +439,20 @@ def _learn_groups(token: str, state: dict, note: str) -> None:
                 print(f"left {event[1]}", flush=True)
 
 
+def _groups_only(state: dict) -> None:
+    """Personal chats stay off the list. Delivery is the group only."""
+    state["chats"] = [chat_id for chat_id in state.get("chats", []) if isinstance(chat_id, int) and chat_id < 0]
+    state["welcomed"] = [chat_id for chat_id in state.get("welcomed", []) if isinstance(chat_id, int) and chat_id < 0]
+
+
 def _ensure_chat(state: dict) -> None:
+    _groups_only(state)
     raw = os.environ.get("RHP_CHAT_ID", "").strip()
     if not raw:
         return
     chat_id = int(raw)
+    if chat_id >= 0:
+        return
     if chat_id not in state["chats"]:
         state["chats"].append(chat_id)
     if chat_id not in state["welcomed"]:
