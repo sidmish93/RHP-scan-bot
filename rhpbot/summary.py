@@ -30,14 +30,6 @@ def summarize(text: str) -> dict[str, str]:
     # The issue table is found by its own heading, wherever the cover banner sits.
     fields.update(_issue(collapsed))
 
-    pre = re.search(
-        r"Pre-IPO Placement.{0,220}?aggregating up to\s+₹\s*([0-9][0-9,]*(?:\.\d+)?)\s*(lakh|crore)s?",
-        collapsed,
-        re.I,
-    )
-    if pre:
-        fields["pre_ipo"] = "up to " + _crore(pre.group(1), pre.group(2))
-
     banks = _bankers(collapsed)
     if banks:
         fields["bankers"] = ", ".join(banks)
@@ -63,7 +55,6 @@ def render(kind: str, company: str, filed: str, fields: dict[str, str], page: st
         ("Fresh issue", "fresh"),
         ("Offer for sale", "ofs"),
         ("Total issue", "total"),
-        ("Pre-IPO placement", "pre_ipo"),
     ):
         if key in fields:
             lines.append(f"{label}: {fields[key]}")

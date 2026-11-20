@@ -46,7 +46,7 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(fields["fresh"], "₹2,500 crore")
         self.assertEqual(fields["ofs"], "none")
         self.assertEqual(fields["total"], "₹2,500 crore")
-        self.assertEqual(fields["pre_ipo"], "up to ₹500 crore")
+        self.assertNotIn("pre_ipo", fields)
         self.assertNotIn("promoter", fields)
         self.assertIn("Axis Capital Limited", fields["bankers"])
         self.assertEqual(fields["sellers"], "none")
