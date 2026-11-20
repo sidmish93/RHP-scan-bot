@@ -1,0 +1,29 @@
+name: Send sample filings
+
+# Manual only. Resends one DRHP, one RHP, and one UDRHP already on SEBI.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: rhp-samples
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install PDF reader
+        run: pip install -r requirements.txt
+
+      - name: Send one filing of each kind
+        env:
+          RHP_BOT_TOKEN: ${{ secrets.RHP_BOT_TOKEN }}
+          RHP_CHAT_ID: ${{ secrets.RHP_CHAT_ID }}
+        run: python -m rhpbot.bot --samples

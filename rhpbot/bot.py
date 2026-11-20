@@ -1,7 +1,9 @@
 """Telegram bot for new SEBI DRHP, UDRHP, and RHP filings.
 
 Run:  python -m rhpbot.bot --once
-The token is read from RHP_BOT_TOKEN.
+      python -m rhpbot.bot --samples
+The token is read from RHP_BOT_TOKEN. --samples resends one DRHP, one RHP,
+and one UDRHP already on SEBI's first page, without treating them as new.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--samples", action="store_true")
     args = parser.parse_args()
     if args.dry_run:
         for filing in filings():
@@ -43,8 +46,42 @@ def main() -> None:
     token = _load_token()
     state = _load_state()
     _ensure_chat(state)
+    if args.samples:
+        _send_samples(token, state)
+        return
     _poll(token, state)
     _save_state(state)
+
+
+def _send_samples(token: str, state: dict) -> None:
+    """One already-filed example of each document, so the chat can be reviewed."""
+    try:
+        found = filings()
+    except Exception as exc:
+        print("feed error: " + _redact(exc, token), flush=True)
+        return
+    chosen = _pick_samples(found)
+    if not state["chats"]:
+        print("RHP_CHAT_ID is missing", flush=True)
+        return
+    for filing in chosen:
+        text, files = _prepare(filing)
+        text = "Sample of a filing already on SEBI\n\n" + text
+        _broadcast(token, state, text, files)
+        print(f"sent {filing.kind} {filing.company} ({len(files)} files)", flush=True)
+    print(f"{len(chosen)} samples, {len(state['chats'])} chats", flush=True)
+
+
+def _pick_samples(found: list[Filing]) -> list[Filing]:
+    preferred = (("DRHP", "il jin"), ("RHP", "mahanadi"), ("UDRHP", "carlsberg"))
+    chosen = []
+    for kind, hint in preferred:
+        match = next((item for item in found if item.kind == kind and hint in item.company.lower()), None)
+        if match is None:
+            match = next((item for item in found if item.kind == kind), None)
+        if match is not None:
+            chosen.append(match)
+    return chosen
 
 
 def _poll(token: str, state: dict) -> None:
