@@ -72,6 +72,18 @@ class SummaryTests(unittest.TestCase):
         self.assertIn("Kotak Mahindra Capital Company Limited", fields["bankers"])
         self.assertIn("J.P. Morgan India Private Limited", fields["bankers"])
 
+    def test_a_broken_not_applicable_stays_in_the_fresh_column(self):
+        text = """
+        DETAILS OF THE OFFER TO THE PUBLIC
+        TYPE FRESH ISSUE OFFER FOR SALE TOTAL OFFER SIZE ELIGIBILITY AND RESERVATION
+        Offer for Sale Not applicabl e Up to 997,461,45 6 Equity Shares of face value of ₹10 each aggregating up to ₹[●] million Up to 997,461,456 Equity Shares of face value of ₹10 each aggregating up to ₹[●] million
+        The Offer is being made pursuant to Regulation 6(1)
+        """
+        fields = summarize(text)
+        self.assertEqual(fields["fresh"], "none")
+        self.assertIn("997,461,456", fields["ofs"])
+        self.assertEqual(fields["total"], fields["ofs"])
+
     def test_business_description_is_not_cut_off(self):
         paragraph = (
             "We are an alcoholic beverage company that offers a portfolio of quality internationally "

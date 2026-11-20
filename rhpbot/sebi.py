@@ -16,7 +16,8 @@ from dataclasses import dataclass
 DRAFTS = "https://www.sebi.gov.in/sebiweb/home/HomeAction.do?doListing=yes&sid=3&ssid=15&smid=10"
 RHPS = "https://www.sebi.gov.in/sebiweb/home/HomeAction.do?doListing=yes&sid=3&ssid=15&smid=11"
 
-_ROW = re.compile(r"<tr[^>]*>\s*<td>\s*([^<]+?)\s*</td>\s*<td>(.*?)</td>", re.S | re.I)
+# SEBI often closes the row with </tr> and leaves the second cell unclosed.
+_ROW = re.compile(r"<tr[^>]*>\s*<td>\s*([^<]+?)\s*</td>\s*<td>(.*?)</tr>", re.S | re.I)
 _PDF = re.compile(r"https://www\.sebi\.gov\.in/[^\"'\s>]+\.pdf", re.I)
 _TAGS = re.compile(r"<[^>]+>")
 _SPACE = re.compile(r"\s+")

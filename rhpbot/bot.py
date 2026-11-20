@@ -39,6 +39,7 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--samples", action="store_true")
     parser.add_argument("--kind", choices=("DRHP", "UDRHP", "RHP"))
+    parser.add_argument("--company", action="append", default=[])
     args = parser.parse_args()
     if args.dry_run:
         for filing in filings():
@@ -48,20 +49,20 @@ def main() -> None:
     state = _load_state()
     _ensure_chat(state)
     if args.samples:
-        _send_samples(token, state, args.kind)
+        _send_samples(token, state, args.kind, args.company)
         return
     _poll(token, state)
     _save_state(state)
 
 
-def _send_samples(token: str, state: dict, kind: str | None = None) -> None:
+def _send_samples(token: str, state: dict, kind: str | None = None, companies: list[str] | None = None) -> None:
     """One already-filed example of each document, so the chat can be reviewed."""
     try:
         found = filings()
     except Exception as exc:
         print("feed error: " + _redact(exc, token), flush=True)
         return
-    chosen = _pick_samples(found)
+    chosen = _pick_named(found, companies or []) or _pick_samples(found)
     if kind:
         chosen = [item for item in chosen if item.kind == kind]
     if not state["chats"]:
@@ -73,6 +74,21 @@ def _send_samples(token: str, state: dict, kind: str | None = None) -> None:
         _broadcast(token, state, text, files)
         print(f"sent {filing.kind} {filing.company} ({len(files)} files)", flush=True)
     print(f"{len(chosen)} samples, {len(state['chats'])} chats", flush=True)
+
+
+def _pick_named(found: list[Filing], companies: list[str]) -> list[Filing]:
+    chosen = []
+    for hint in companies:
+        key = hint.strip().lower()
+        if not key:
+            continue
+        match = next((item for item in found if key in item.company.lower()), None)
+        if match is None:
+            print(f"not on the current page: {hint}", flush=True)
+            continue
+        if match not in chosen:
+            chosen.append(match)
+    return chosen
 
 
 def _pick_samples(found: list[Filing]) -> list[Filing]:

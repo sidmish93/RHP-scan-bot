@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 _SPACE = re.compile(r"\s+")
-_BANK = re.compile(r"([A-Z][A-Za-z0-9&.,'’\-][A-Za-z0-9&.,'’\- ]{2,70}?(?:Limited|LLP))")
+_BANK = re.compile(r"([A-Z][A-Za-z0-9&.,'’\-()][A-Za-z0-9&.,'’\-() ]{2,80}?(?:Limited|LLP))")
 # A size cell is either "Not applicable" or "up to N equity shares ... aggregating up to ₹X".
 # The rupee amount may still be the unset placeholder [●].
 _SIZE = re.compile(
@@ -118,6 +118,9 @@ def _issue(cover: str) -> dict[str, str]:
     if finish < 0:
         finish = begin + 1600
     block = cover[begin:finish]
+    # A PDF sometimes splits a word or a number across a line, so "applicable" and "456" come back broken.
+    block = re.sub(r"(?<=\d)\s+(?=\d)", "", block)
+    block = re.sub(r"not\s+applicabl\s*e", "not applicable", block, flags=re.I)
     data = block
     for marker in ("ELIGIBILITY AND RESERVATION", "ELIGIBILITY"):
         at = data.upper().find(marker)
@@ -158,26 +161,14 @@ def _size_text(match: re.Match) -> str:
     return f"{parts[0]}, {parts[1]}"
 
 
-def _slice_until_any(text: str, start: str, ends: tuple[str, ...]) -> str:
-    begin = text.upper().find(start.upper())
-    if begin < 0:
-        return ""
-    finish = -1
-    for end in ends:
-        at = text.upper().find(end.upper(), begin + len(start))
-        if at >= 0 and (finish < 0 or at < finish):
-            finish = at
-    if finish < 0:
-        finish = begin + 700
-    return text[begin:finish]
-
-
 def _bank_name(raw: str) -> str:
     name = re.sub(r"^.*(?:TELEPHONE|LOGO|CONTACT PERSON)\s+", "", raw, flags=re.I)
     name = re.sub(r"^(?:.*\b)?(?:and\s+)?e-\s*mail\s+", "", name, flags=re.I)
     name = _SPACE.sub(" ", name).strip(" .,-")
     low = name.lower()
-    if not name or any(skip in low for skip in ("telephone", "logo", "bse limited", "national stock", "stock exchange")):
+    if not name or low in {"private limited", "limited", "llp"} or any(
+        skip in low for skip in ("telephone", "logo", "bse limited", "national stock", "stock exchange")
+    ):
         return ""
     return name
 
@@ -216,7 +207,15 @@ def _crore(raw: str, unit: str) -> str:
 
 
 def _bankers(text: str) -> list[str]:
-    block = _slice_until_any(text, "BOOK RUNNING LEAD MANAGERS", ("REGISTRAR TO THE ISSUE", "REGISTRAR TO THE OFFER"))
+    # The cover mentions the managers once in a risk paragraph and again in the actual table, just before the registrar.
+    upper = text.upper()
+    finish = len(text)
+    for end in ("REGISTRAR TO THE ISSUE", "REGISTRAR TO THE OFFER"):
+        at = upper.find(end)
+        if 0 <= at < finish:
+            finish = at
+    begin = upper.rfind("BOOK RUNNING LEAD", 0, finish)
+    block = "" if begin < 0 else text[begin:finish]
     found = []
     for part in re.split(r"E-?mail", block, flags=re.I):
         names = _BANK.findall(part)
@@ -225,7 +224,7 @@ def _bankers(text: str) -> list[str]:
         name = _bank_name(names[-1])
         if name and name not in found:
             found.append(name)
-    return found[:6]
+    return found[:8]
 
 
 def _sellers(text: str) -> list[str]:

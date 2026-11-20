@@ -14,7 +14,7 @@ HTML = """
 </tr>
 <tr>
   <td>Nov 14, 2026</td>
-  <td><a href="https://www.sebi.gov.in/filings/public-issues/nov-2026/rediff_3.html">Rediff com India Limited - UDRHP-I</a></td>
+  <td><a href="https://www.sebi.gov.in/filings/public-issues/nov-2026/rediff_3.html">Rediff com India Limited - UDRHP-I</a>
 </tr>
 <tr>
   <td>Nov 14, 2026</td>

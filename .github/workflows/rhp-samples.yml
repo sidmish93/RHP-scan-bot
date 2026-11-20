@@ -8,6 +8,10 @@ on:
         description: DRHP, UDRHP, or RHP. Leave blank to send one of each.
         required: false
         default: ""
+      companies:
+        description: Comma-separated company names already on SEBI. Leave blank for the default three.
+        required: false
+        default: ""
 
 concurrency:
   group: rhp-samples
@@ -32,9 +36,19 @@ jobs:
           RHP_BOT_TOKEN: ${{ secrets.RHP_BOT_TOKEN }}
           RHP_CHAT_ID: ${{ secrets.RHP_CHAT_ID }}
           SAMPLE_KIND: ${{ inputs.kind }}
+          SAMPLE_COMPANIES: ${{ inputs.companies }}
         run: |
-          if [ -n "$SAMPLE_KIND" ]; then
-            python -m rhpbot.bot --samples --kind "$SAMPLE_KIND"
-          else
-            python -m rhpbot.bot --samples
-          fi
+          python - <<'PY'
+          import os
+          import subprocess
+          import sys
+
+          command = [sys.executable, "-m", "rhpbot.bot", "--samples"]
+          kind = os.environ.get("SAMPLE_KIND", "").strip()
+          if kind:
+              command += ["--kind", kind]
+          for name in os.environ.get("SAMPLE_COMPANIES", "").split(","):
+              if name.strip():
+                  command += ["--company", name.strip()]
+          raise SystemExit(subprocess.call(command))
+          PY
