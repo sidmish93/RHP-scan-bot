@@ -1,11 +1,11 @@
 name: RHP filings
 
 # SEBI posts draft and red herring documents outside market hours.
-# Ten minutes is enough for a filing alert. GitHub will not schedule
-# anything shorter than five, and a public repository is not billed.
+# Ten minutes is enough for a filing alert. The minutes avoid :00, when
+# GitHub is most likely to drop a scheduled run. A public repository is not billed.
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "4,14,24,34,44,54 * * * *"
   workflow_dispatch:
 
 concurrency:
