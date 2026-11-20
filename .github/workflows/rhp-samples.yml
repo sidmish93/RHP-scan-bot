@@ -3,6 +3,11 @@ name: Send sample filings
 # Manual only. Resends one DRHP, one RHP, and one UDRHP already on SEBI.
 on:
   workflow_dispatch:
+    inputs:
+      kind:
+        description: DRHP, UDRHP, or RHP. Leave blank to send one of each.
+        required: false
+        default: ""
 
 concurrency:
   group: rhp-samples
@@ -26,4 +31,10 @@ jobs:
         env:
           RHP_BOT_TOKEN: ${{ secrets.RHP_BOT_TOKEN }}
           RHP_CHAT_ID: ${{ secrets.RHP_CHAT_ID }}
-        run: python -m rhpbot.bot --samples
+          SAMPLE_KIND: ${{ inputs.kind }}
+        run: |
+          if [ -n "$SAMPLE_KIND" ]; then
+            python -m rhpbot.bot --samples --kind "$SAMPLE_KIND"
+          else
+            python -m rhpbot.bot --samples
+          fi

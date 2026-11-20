@@ -1,6 +1,6 @@
 import unittest
 
-from rhpbot.summary import render, summarize
+from rhpbot.summary import _bank_name, render, summarize
 
 COVER = """
 NAME OF OUR PROMOTER: AMBER ENTERPRISES INDIA LIMITED
@@ -24,6 +24,21 @@ Objects of the Issue
 Total Net Proceeds
 """
 
+PLACEHOLDER = """
+THE PROMOTERS OF OUR COMPANY ARE CARLSBERG A/S AND SOUTH ASIAN BREWERIES PTE. LTD
+DETAILS OF THE OFFER TO THE PUBLIC
+TYPE FRESH ISSUE SIZE OFFER FOR SALE SIZE TOTAL OFFER SIZE ELIGIBILITY AND RESERVATION
+Offer for Sale Not applicable Offer for Sale of up to 86,418,887 Equity Shares of face value of ₹1 each aggregating up to ₹[●] million Up to 86,418,887 Equity Shares of face value of ₹1 each aggregating up to ₹ [●] million
+The Offer is being made pursuant to Regulation 6(1)
+DETAILS OF THE OFFER FOR SALE
+South Asian Breweries Pte. Ltd Promoter Selling Shareholder Up to 86,418,887 Equity Shares
+BOOK RUNNING LEAD MANAGERS
+Kotak Mahindra Capital Company Limited Ganesh Rane E-mail: carlsberg.ipo@kotak.com
+Citigroup Global Markets India Private Limited Sivamsa Pingali E-mail: carlsbergindia.ipo@citi.com
+J.P. Morgan India Private Limited Darshil Mehta E-mail: carlsberg_India_IPO@jpmorgan.com
+REGISTRAR TO THE OFFER
+"""
+
 
 class SummaryTests(unittest.TestCase):
     def test_cover_fields(self):
@@ -43,6 +58,22 @@ class SummaryTests(unittest.TestCase):
         fields = summarize(text)
         self.assertIn("Alpha Capital", fields["sellers"])
         self.assertNotEqual(fields["ofs"], "none")
+
+    def test_placeholder_offer_for_sale_keeps_the_share_count(self):
+        fields = summarize(PLACEHOLDER)
+        self.assertEqual(fields["fresh"], "none")
+        self.assertEqual(
+            fields["ofs"],
+            "up to 86,418,887 equity shares of face value ₹1 each, aggregating up to ₹[●] million",
+        )
+        self.assertEqual(fields["total"], fields["ofs"])
+        self.assertIn("CARLSBERG A/S", fields["promoter"])
+        self.assertIn("South Asian Breweries Pte. Ltd", fields["sellers"])
+        self.assertIn("Kotak Mahindra Capital Company Limited", fields["bankers"])
+        self.assertIn("J.P. Morgan India Private Limited", fields["bankers"])
+
+    def test_bank_name_drops_the_email_header(self):
+        self.assertEqual(_bank_name("AND E- MAIL SBI Capital Markets Limited"), "SBI Capital Markets Limited")
 
     def test_message_includes_the_sebi_page(self):
         body = render("DRHP", "Acme Limited", "19 Nov 2026", {"fresh": "₹100 crore"}, "https://sebi.example/a", "")

@@ -5,8 +5,19 @@ from __future__ import annotations
 import re
 
 _SPACE = re.compile(r"\s+")
-_AMOUNT = re.compile(r"₹\s*([0-9][0-9,]*(?:\.\d+)?)\s*(lakh|crore)s?", re.I)
 _BANK = re.compile(r"([A-Z][A-Za-z0-9&.,'’\-][A-Za-z0-9&.,'’\- ]{2,70}?(?:Limited|LLP))")
+# A size cell is either "Not applicable" or "up to N equity shares ... aggregating up to ₹X".
+# The rupee amount may still be the unset placeholder [●].
+_SIZE = re.compile(
+    r"(?:(?:fresh issue(?:\s+and\s+offer\s+for\s+sale)?|offer\s+for\s+sale)\s+of\s+)?"
+    r"up\s+to\s+(?P<shares>\[(?:●|•)\]|[\d,]+)\s+equity\s+shares"
+    r"(?:\s+of\s+face\s+value\s+of\s+₹\s*(?P<face>[\d,.]+)\s+each)?"
+    r"\s+aggregating\s+up\s+to\s+₹\s*(?P<amount>\[(?:●|•)\]|[\d,]+(?:\.\d+)?)\s*"
+    r"(?P<unit>lakhs?|crores?|millions?)"
+    r"|(?P<na>\bnot\s+applicable\b)"
+    r"|aggregating\s+up\s+to\s+₹\s*(?P<only>[\d,]+(?:\.\d+)?)\s*(?P<only_unit>lakhs?|crores?|millions?)",
+    re.I,
+)
 
 
 def summarize(text: str) -> dict[str, str]:
@@ -30,6 +41,8 @@ def summarize(text: str) -> dict[str, str]:
         cover,
         re.I,
     )
+    if not promoter:
+        promoter = re.search(r"PROMOTERS OF OUR COMPANY ARE\s+(.+?)\s+DETAILS OF", cover, re.I)
     if promoter:
         fields["promoter"] = _SPACE.sub(" ", promoter.group(1)).strip(" .:-")
 
@@ -88,45 +101,80 @@ def render(kind: str, company: str, filed: str, fields: dict[str, str], page: st
 
 
 def _issue(cover: str) -> dict[str, str]:
-    begin = cover.upper().find("DETAILS OF ISSUE")
-    if begin < 0:
-        begin = cover.upper().find("FRESH ISSUE")
+    """Fresh, offer for sale, then total, in the order of the cover table.
+
+    "Not applicable" belongs to whichever column it sits in. A cell whose price
+    is still [●] keeps the share count instead of being dropped.
+    """
+    upper = cover.upper()
+    begin = -1
+    for marker in ("DETAILS OF THE OFFER TO THE PUBLIC", "DETAILS OF THE ISSUE TO THE PUBLIC", "DETAILS OF ISSUE", "DETAILS OF THE OFFER", "FRESH ISSUE"):
+        begin = upper.find(marker)
+        if begin >= 0:
+            break
     if begin < 0:
         return {}
-    finish = cover.upper().find("RISKS IN RELATION", begin)
+    finish = upper.find("RISKS IN RELATION", begin)
     if finish < 0:
         finish = begin + 1600
     block = cover[begin:finish]
-    amounts = list(_AMOUNT.finditer(block))
-    absent = re.search(r"not applicable", block, re.I)
-    fields: dict[str, str] = {}
-    if absent:
-        before = [item for item in amounts if item.start() < absent.start()]
-        after = [item for item in amounts if item.start() > absent.start()]
-        if before:
-            fields["fresh"] = _crore(before[0].group(1), before[0].group(2))
-        fields["ofs"] = "none"
-        if after:
-            fields["total"] = _crore(after[0].group(1), after[0].group(2))
-        return fields
+    data = block
+    for marker in ("ELIGIBILITY AND RESERVATION", "ELIGIBILITY"):
+        at = data.upper().find(marker)
+        if at >= 0:
+            data = data[at + len(marker):]
+            break
+    stop = re.search(r"\bThe (?:Issue|Offer) is being made\b", data, re.I)
+    if stop:
+        data = data[:stop.start()]
     labels = ("fresh", "ofs", "total")
-    for label, match in zip(labels, amounts):
-        fields[label] = _crore(match.group(1), match.group(2))
+    fields: dict[str, str] = {}
+    for label, match in zip(labels, _SIZE.finditer(data)):
+        fields[label] = _size_text(match)
     return fields
 
 
-def _slice(text: str, start: str, end: str) -> str:
+def _size_text(match: re.Match) -> str:
+    if match.group("na"):
+        return "none"
+    amount = match.group("amount") or match.group("only")
+    unit = match.group("unit") or match.group("only_unit") or ""
+    if amount and not amount.startswith("["):
+        return _crore(amount, unit)
+    shares = match.group("shares") or "[●]"
+    share_text = "up to [●] equity shares" if shares.startswith("[") else f"up to {shares} equity shares"
+    parts = [share_text]
+    face = match.group("face")
+    if face:
+        parts.append(f"of face value ₹{face} each")
+    unit_word = "million"
+    if unit.lower().startswith("lakh"):
+        unit_word = "lakhs"
+    elif unit.lower().startswith("crore"):
+        unit_word = "crore"
+    parts.append(f"aggregating up to ₹[●] {unit_word}")
+    if len(parts) == 3:
+        return f"{parts[0]} {parts[1]}, {parts[2]}"
+    return f"{parts[0]}, {parts[1]}"
+
+
+def _slice_until_any(text: str, start: str, ends: tuple[str, ...]) -> str:
     begin = text.upper().find(start.upper())
     if begin < 0:
         return ""
-    finish = text.upper().find(end.upper(), begin + len(start))
+    finish = -1
+    for end in ends:
+        at = text.upper().find(end.upper(), begin + len(start))
+        if at >= 0 and (finish < 0 or at < finish):
+            finish = at
     if finish < 0:
-        finish = begin + 500
+        finish = begin + 700
     return text[begin:finish]
 
 
 def _bank_name(raw: str) -> str:
     name = re.sub(r"^.*(?:TELEPHONE|LOGO|CONTACT PERSON)\s+", "", raw, flags=re.I)
+    name = re.sub(r"^(?:.*\b)?(?:and\s+)?e-\s*mail\s+", "", name, flags=re.I)
     name = _SPACE.sub(" ", name).strip(" .,-")
     low = name.lower()
     if not name or any(skip in low for skip in ("telephone", "logo", "bse limited", "national stock", "stock exchange")):
@@ -148,8 +196,11 @@ def _business(text: str) -> str:
 
 def _crore(raw: str, unit: str) -> str:
     value = float(raw.replace(",", ""))
-    if unit.lower().startswith("lakh"):
+    low = unit.lower()
+    if low.startswith("lakh"):
         value /= 100
+    elif low.startswith("million"):
+        value /= 10
     if value >= 100:
         return f"₹{value:,.0f} crore"
     text = f"{value:,.2f}".rstrip("0").rstrip(".")
@@ -157,7 +208,7 @@ def _crore(raw: str, unit: str) -> str:
 
 
 def _bankers(text: str) -> list[str]:
-    block = _slice(text, "BOOK RUNNING LEAD MANAGERS", "REGISTRAR TO THE ISSUE")
+    block = _slice_until_any(text, "BOOK RUNNING LEAD MANAGERS", ("REGISTRAR TO THE ISSUE", "REGISTRAR TO THE OFFER"))
     found = []
     for part in re.split(r"E-?mail", block, flags=re.I):
         names = _BANK.findall(part)
@@ -171,13 +222,15 @@ def _bankers(text: str) -> list[str]:
 
 def _sellers(text: str) -> list[str]:
     found = []
-    for name in re.findall(
+    patterns = (
         r"([A-Z][A-Za-z0-9&.,'’\- ]{2,70}?)\s+\((?:the\s+)?[\"“]?Selling Shareholder",
-        text,
-    ):
-        name = _SPACE.sub(" ", name).strip(" ,;")
-        if name and name not in found:
-            found.append(name)
+        r"((?:[A-Z][A-Za-z0-9&.'’\-]*\s+){1,8}?(?:Limited|Ltd\.?|LLP))\s+(?:Promoter\s+)?Selling Shareholder",
+    )
+    for pattern in patterns:
+        for name in re.findall(pattern, text):
+            name = _SPACE.sub(" ", name).strip(" ,;")
+            if name and name not in found:
+                found.append(name)
     return found[:8]
 
 
