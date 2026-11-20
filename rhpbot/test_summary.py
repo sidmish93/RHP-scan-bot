@@ -47,7 +47,7 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(fields["ofs"], "none")
         self.assertEqual(fields["total"], "₹2,500 crore")
         self.assertEqual(fields["pre_ipo"], "up to ₹500 crore")
-        self.assertIn("AMBER ENTERPRISES", fields["promoter"])
+        self.assertNotIn("promoter", fields)
         self.assertIn("Axis Capital Limited", fields["bankers"])
         self.assertEqual(fields["sellers"], "none")
         self.assertIn("Repayment", fields["objects"])
@@ -72,7 +72,7 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(fields["fresh"], "up to 270,000,000 equity shares of face value ₹10 each, aggregating up to ₹[●] million")
         self.assertEqual(fields["ofs"], "none")
         self.assertEqual(fields["sellers"], "none")
-        self.assertIn("RELIANCE INDUSTRIES LIMITED", fields["promoter"])
+        self.assertNotIn("promoter", fields)
 
     def test_seller_without_a_promoter_label_and_a_rupee_amount(self):
         names = _sellers(
@@ -100,6 +100,23 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(fields["fresh"], "₹320 crore")
         self.assertEqual(fields["ofs"], "₹232 crore")
         self.assertEqual(fields["total"], "₹552 crore")
+
+    def test_fund_name_keeps_the_manager_in_brackets(self):
+        text = """
+        NAME OF THE SELLING SHAREHOLDERS (IN ₹)^
+        Ankit Virendra Gupta Promoter Selling Shareholder Up to 6,000,000 Equity Shares bearing face value of ₹2 each aggregating to ₹[●] million Negligible
+        Negen Tech Opportunities Angel Fund (represented by its investment manager, Negen Capital Services Private Limited) Investor Selling Shareholder Up to 6,468,315 Equity Shares bearing face value of ₹2 each aggregating to ₹[●] million 13.18#
+        Peak XV Partners Investments V (Formerly known as SCI Investments V) Investor Selling Shareholder Up to 17,611,820 Equity Shares of face value of ₹1 each aggregating up to ₹[●] million 6.31
+        """
+        names = _sellers(text)
+        self.assertEqual(
+            names,
+            [
+                "Ankit Virendra Gupta (up to 6,000,000 shares)",
+                "Negen Tech Opportunities Angel Fund (represented by its investment manager, Negen Capital Services Private Limited) (up to 6,468,315 shares)",
+                "Peak XV Partners Investments V (Formerly known as SCI Investments V) (up to 17,611,820 shares)",
+            ],
+        )
 
     def test_selling_shareholder_table_includes_trusts_people_and_investors(self):
         text = """
@@ -131,7 +148,7 @@ class SummaryTests(unittest.TestCase):
             "up to 86,418,887 equity shares of face value ₹1 each, aggregating up to ₹[●] million",
         )
         self.assertEqual(fields["total"], fields["ofs"])
-        self.assertIn("CARLSBERG A/S", fields["promoter"])
+        self.assertNotIn("promoter", fields)
         self.assertIn("South Asian Breweries Pte. Ltd", fields["sellers"])
         self.assertIn("Kotak Mahindra Capital Company Limited", fields["bankers"])
         self.assertIn("J.P. Morgan India Private Limited", fields["bankers"])

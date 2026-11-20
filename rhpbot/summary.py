@@ -40,18 +40,6 @@ def summarize(text: str) -> dict[str, str]:
     if pre:
         fields["pre_ipo"] = "up to " + _crore(pre.group(1), pre.group(2))
 
-    promoter = re.search(
-        r"NAME OF OUR PROMOTERS?\s*[:\-]?\s*(.+?)\s+DETAILS OF (?:THE )?(?:ISSUE|OFFER)",
-        cover,
-        re.I,
-    )
-    if not promoter:
-        promoter = re.search(r"PROMOTERS OF OUR COMPANY ARE\s+(.+?)\s+DETAILS OF", cover, re.I)
-    if not promoter:
-        promoter = re.search(r"OUR PROMOTERS?\s*:\s*(.+?)\s+DETAILS OF", cover, re.I)
-    if promoter:
-        fields["promoter"] = _SPACE.sub(" ", promoter.group(1)).strip(" .:-")
-
     banks = _bankers(collapsed)
     if banks:
         fields["bankers"] = ", ".join(banks)
@@ -85,10 +73,8 @@ def render(kind: str, company: str, filed: str, fields: dict[str, str], page: st
     ):
         if key in fields:
             lines.append(f"{label}: {fields[key]}")
-    if any(key in fields for key in ("promoter", "bankers", "sellers")):
+    if any(key in fields for key in ("bankers", "sellers")):
         lines.append("")
-    if "promoter" in fields:
-        lines.append(f"Promoter: {fields['promoter']}")
     if "bankers" in fields:
         lines.append(f"Bankers: {fields['bankers']}")
     if "sellers" in fields:
@@ -246,16 +232,35 @@ def _bankers(text: str) -> list[str]:
     return found[:8]
 
 
+_SELLER_ROW = re.compile(
+    r"(?:(Promoter Group|Promoter|Investor|Individual|Other)\s+)?"
+    r"Selling Shareholder\s+"
+    r"(?:Up to\s+)?(\[●\]|[\d,]+)\s+Equity Shares"
+    r"(?:\s+(?:of|bearing)\s+face\s+value\s+of\s+₹\s*[\d,.]+\s+each)?"
+    r"(?:.{0,80}?aggregating(?:\s+up)?\s+to\s+₹\s*([\d,]+(?:\.\d+)?)\s*(?:[\d.]+\s+)?(lakhs?|crores?|millions?))?"
+    r"(?:\s+(?:Negligible#?|Nil|\d+\.\d+#?))?",
+)
+_NAME_CUT = re.compile(
+    r"Negligible#?\s+|\bNil\s+|\d+\.\d+#?\s+|\(IN ₹\)\s*\*?\s*\^?\s*|#\s+|\*\s*(?=[A-Z])",
+    re.I,
+)
+
+
 def _sellers(text: str) -> list[str]:
     found = []
     seen = set()
 
     def add(name: str) -> None:
-        name = _SPACE.sub(" ", name).strip(" ,;")
+        name = _SPACE.sub(" ", name).strip(" ,;^#*")
         name = re.sub(r"^(?:Negligible|Nil)\s+", "", name)
-        name = re.sub(r"^.*\bSELLING SHAREHOLDERS?\s+", "", name, flags=re.I).strip(" ,;")
+        name = re.sub(r"^.*\bSELLING SHAREHOLDERS?\s+", "", name, flags=re.I).strip(" ,;^#*")
         key = name.lower().rstrip(".")
-        if not name or key in {"ltd", "limited", "llp", "llc", "lp", "investor", "promoter", "other", "promoter group", "dr"} or key in seen:
+        if (
+            not name
+            or "equity shares" in key
+            or key in {"ltd", "limited", "llp", "llc", "lp", "investor", "promoter", "other", "promoter group", "individual", "dr"}
+            or key in seen
+        ):
             return
         seen.add(key)
         found.append(name)
@@ -265,24 +270,41 @@ def _sellers(text: str) -> list[str]:
         text,
     ):
         add(name)
-    # "Name [Promoter / Promoter Group / Investor] Selling Shareholder [Up to] N Equity Shares".
-    row = re.compile(
-        r"((?:[A-Z][A-Za-z0-9&.'’\-/]*\.?\s+){1,12}?)"
-        r"(?:(?:Promoter Group|Promoter|Investor|Other)\s+)?"
-        r"Selling Shareholder\s+"
-        r"(?:Up to\s+)?(\[●\]|[\d,]+)\s+Equity Shares"
-        r"(?:\s+(?:of|bearing)\s+face\s+value\s+of\s+₹\s*[\d,.]+\s+each)?"
-        r"(?:.{0,60}?aggregating(?:\s+up)?\s+to\s+₹\s*([\d,]+(?:\.\d+)?)\s*(?:[\d.]+\s+)?(lakhs?|crores?|millions?))?",
-    )
-    for name, shares, amount, unit in row.findall(text):
+    # The name sits immediately before the type, and may contain brackets and lowercase words.
+    previous = 0
+    for match in _SELLER_ROW.finditer(text):
+        shares, amount, unit = match.group(2), match.group(3), match.group(4)
+        window = text[previous:match.start()][-500:]
+        cuts = list(_NAME_CUT.finditer(window))
+        if cuts:
+            window = window[cuts[-1].end():]
+        earlier = list(
+            re.finditer(
+                r"Equity Shares\b(?:\s+(?:of|bearing)\s+face\s+value\s+of\s+₹\s*[\d,.]+\s+each)?"
+                r"(?:.{0,50}?aggregating(?:\s+up)?\s+to\s+₹\s*(?:\[●\]|[\d,.]+)\s*(?:lakhs?|crores?|millions?)?)?",
+                window,
+                re.I,
+            )
+        )
+        if earlier:
+            window = window[earlier[-1].end():]
+        window = re.sub(r"^.*\bOFFER FOR SALE\b\s*", "", window, flags=re.I)
+        window = re.sub(
+            r"^(?:(?:of|bearing)\s+face\s+value\s+of\s+₹\s*[\d,.]+\s+each\s*)",
+            "",
+            window,
+            flags=re.I,
+        )
+        name = window
         if amount and unit:
             detail = _crore(amount, unit)
         elif shares.startswith("["):
             detail = "share count not stated"
         else:
             detail = f"up to {shares} shares"
-        add(f"{name.strip()} ({detail})")
-    return found[:8]
+        add(f"{name} ({detail})")
+        previous = match.end()
+    return found[:12]
 
 
 def _objects(text: str) -> list[str]:
