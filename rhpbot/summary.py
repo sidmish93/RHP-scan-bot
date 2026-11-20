@@ -70,9 +70,10 @@ def render(kind: str, company: str, filed: str, fields: dict[str, str], page: st
         lines.append("")
         lines.append("Business: " + fields["business"])
     lines.append("")
-    lines.append(page)
-    if full and full != page:
+    if full:
         lines.append(full)
+    elif page:
+        lines.append(page)
     return "\n".join(lines).strip()
 
 

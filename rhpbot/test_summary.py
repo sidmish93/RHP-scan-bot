@@ -377,6 +377,7 @@ class SummaryTests(unittest.TestCase):
             "https://www.sebi.gov.in/sebi_data/attachdocs/acme.pdf",
         )
         self.assertIn("https://www.sebi.gov.in/sebi_data/attachdocs/acme.pdf", body)
+        self.assertNotIn("https://www.sebi.gov.in/filings/acme.html", body)
 
     def test_bankers_and_sellers_are_separated(self):
         body = render(
