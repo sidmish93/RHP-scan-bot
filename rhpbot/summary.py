@@ -24,13 +24,9 @@ _SIZE = re.compile(
 def summarize(text: str) -> dict[str, str]:
     """Pull the fields that fit in a phone message. Missing fields are omitted."""
     collapsed = _SPACE.sub(" ", text or "").strip()
-    # Some abridged covers print "in the nature of" as a header before the issue table.
-    nature = collapsed.upper().find("IN THE NATURE OF")
-    cover = collapsed[:nature] if nature > 1500 else collapsed
-    cover = cover[:8000]
     fields: dict[str, str] = {}
-
-    fields.update(_issue(cover))
+    # The issue table is found by its own heading, wherever the cover banner sits.
+    fields.update(_issue(collapsed))
 
     pre = re.search(
         r"Pre-IPO Placement.{0,220}?aggregating up to\s+₹\s*([0-9][0-9,]*(?:\.\d+)?)\s*(lakh|crore)s?",
@@ -176,78 +172,98 @@ def _bank_name(raw: str) -> str:
     return name
 
 
-_OPENER = re.compile(
-    r"\b(?:We (?:are|own|operate|provide|carry|offer)|Our Company is|The Company is)\b",
+# The abridged prospectus schedule item, not a sentence that happens to say "we are".
+_SECTION = re.compile(
+    r"summary of (?:the )?primary business|(?<![A-Za-z])primary business(?=\s+[a-h][.)])",
     re.I,
 )
-# A lettered or numbered subsection. The capital after the marker keeps "e.g." and "2026." from matching.
-_HEADING = re.compile(
-    r"\s+[a-h][.)]\s+[A-Z]|\s+(?:[1-9]|1[0-2])\.\s+[A-Z]"
-    r"|\s+(?:Set out below|The following table)\b",
+# The next outline item. The period that closes the previous sentence stays in that sentence.
+_OUTLINE = re.compile(
+    r"\s+\(?[a-h]\)(?=\s+[A-Z])"
+    r"|\s+[a-h][.)](?=\s+[A-Z])"
+    r"|\s+(?:[1-9]|1[0-2])[.)](?=\s+[A-Z])"
+    r"|(?:^|(?<! [a-h]\.\s)(?<=\.\s))business overview\b",
     re.I,
 )
+# The schedule label in front of the first sentence, for example
+# "Business overview – products or services offered by our Company".
+_LABEL = re.compile(
+    r"^(?:our business model\s+)?"
+    r"(?:business overview\b"
+    r"(?:(?:\s*[–\-:/]\s*|\s+)"
+    r"(?!(?:we|as per|according to)\b)"
+    r"(?!(?<!by )(?:our company|the company)\b)"
+    r"[A-Za-z/,&]+)*)?",
+    re.I,
+)
+
+
+def has_business_section(text: str) -> bool:
+    return _section_end(_SPACE.sub(" ", text or "")) >= 0
 
 
 def _business(text: str) -> str:
-    """The company description from the primary-business summary.
+    """The prose under the primary-business heading, through the next outline item.
 
-    The narrative sometimes starts "We own" rather than "We are", and it sometimes
-    sits under "a. Business overview". A later "Business overview" heading is only
-    a products table, so a match clipped at the end of that table is not used.
+    The paragraph may open with the company's name. When that heading is only a
+    label, the description is the first lettered subsection. A later products
+    table is the next outline item, so it is not part of the paragraph.
     """
-    anchor = _business_anchor(text)
-    if anchor < 0:
+    end = _section_end(text)
+    if end < 0:
         return ""
-    opener = _OPENER.search(text, anchor, anchor + 1200)
-    if not opener:
-        return ""
-    body = text[opener.start():opener.start() + 3500]
-    body = _until_heading(body)
-    body = re.sub(
-        r"\s+Business overview\s*[–\-]\s*products(?:\s+and|\s+or)?\s+services(?:\s+offered by our Company)?\s+",
-        " ",
-        body,
-        flags=re.I,
-    )
+    region = text[end:end + 4000]
+    body = _business_body(region)
+    body = re.sub(r"\s*For further (?:details|information), see\b.*$", "", body, flags=re.I)
     body = re.sub(r"([A-Za-z])\d{1,2}\b", r"\1", body)
+    body = re.sub(r",\s*\d{1,2}\s+(?=[A-Za-z])", ", ", body)
     body = re.sub(r"\s+\.", ".", body)
-    body = re.sub(r"\s+In this context:\s*$", "", body, flags=re.I)
-    body = re.sub(r"\s+\d{1,3}\s*$", "", body)
     body = _SPACE.sub(" ", body).strip()
-    if len(body) < 40:
+    stop = max(body.rfind("."), body.rfind("!"))
+    if stop >= 24:
+        body = body[:stop + 1]
+    if len(body) < 25:
         return ""
     if len(body) > 1800:
         body = body[:1800].rsplit(". ", 1)[0] + "."
     return body
 
 
-def _business_anchor(text: str) -> int:
-    upper = text.upper()
-    for needle in ("SUMMARY OF THE PRIMARY BUSINESS", "BUSINESS OVERVIEW"):
-        at = 0
-        while True:
-            at = upper.find(needle, at)
-            if at < 0:
-                break
-            if _OPENER.search(text, at, at + 1200):
-                return at
-            at += len(needle)
+def _section_end(text: str) -> int:
+    """Where the primary-business body starts. A contents entry is not the section."""
+    for match in _SECTION.finditer(text or ""):
+        after = text[match.end():match.end() + 200]
+        if re.search(r"\.{3,}", after[:70]):
+            continue
+        if re.match(r"\s*\d{1,3}\b", after) and not re.search(r"[a-h][.)]\s+[A-Z]", after, re.I):
+            continue
+        return match.end()
+    for match in re.finditer(r"\bbusiness overview\b", text or "", re.I):
+        after = text[match.end():match.end() + 220]
+        before = text[max(0, match.start() - 24):match.start()]
+        if re.search(r"\.{3,}", after[:70]):
+            continue
+        if re.search(r"\b(?:see|on page)\b", before, re.I):
+            continue
+        if "." in after and re.search(r"\b(?:we|the company|our company)\b", after, re.I):
+            return match.end()
     return -1
 
 
-def _until_heading(chunk: str) -> str:
-    stop = _HEADING.search(chunk)
-    if not stop:
-        return chunk
-    # A one-line lead-in before "a. Business overview" is the label, not the description.
-    if stop.start() < 160 and re.match(r"\s+a[.)]", stop.group(), re.I):
-        nxt = _HEADING.search(chunk, stop.end())
-        if nxt and nxt.start() - stop.end() > 80:
-            prose = re.search(r"\bWe [a-z]", chunk[stop.end():nxt.start()])
-            if prose:
-                return chunk[:stop.start()] + " " + chunk[stop.end() + prose.start():nxt.start()]
-            return chunk[:nxt.start()]
-    return chunk[:stop.start()]
+def _business_body(region: str) -> str:
+    marks = list(_OUTLINE.finditer(region))
+    if not marks:
+        return _drop_title(region)
+    intro = _drop_title(region[:marks[0].start()])
+    if len(intro) >= 25 and "." in intro:
+        return intro
+    finish = marks[1].start() if len(marks) > 1 else len(region)
+    return _drop_title(region[marks[0].end():finish])
+
+
+def _drop_title(text: str) -> str:
+    """Drop the subsection label in front of the first sentence."""
+    return _LABEL.sub("", text.strip(), count=1).strip()
 
 
 def _crore(raw: str, unit: str) -> str:

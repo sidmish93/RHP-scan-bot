@@ -204,7 +204,7 @@ class SummaryTests(unittest.TestCase):
         self.assertNotIn("employees", fields["business"])
         self.assertNotIn("engaged", fields["business"])
 
-    def test_a_one_line_lead_in_keeps_the_products_paragraph(self):
+    def test_the_summary_paragraph_stands_without_the_products_subsection(self):
         text = (
             "Summary of the primary business We are a financial technology company focused on digital gifting. "
             "a. Business Overview - Products and services We act as a program manager for prepaid cards and "
@@ -212,10 +212,58 @@ class SummaryTests(unittest.TestCase):
             "b. Industries served and typical customers Banks and merchants."
         )
         fields = summarize(text)
-        self.assertIn("financial technology", fields["business"])
-        self.assertIn("SpendPro", fields["business"])
-        self.assertNotIn("Business Overview", fields["business"])
-        self.assertNotIn("Banks and merchants", fields["business"])
+        self.assertEqual(
+            fields["business"],
+            "We are a financial technology company focused on digital gifting.",
+        )
+
+    def test_lettered_overview_heading_is_not_the_description(self):
+        text = (
+            "Summary of the primary business a. Business overview – products and services "
+            "We are an alcoholic beverage company that offers beer brands in India. "
+            "b. Industries served and typical customers Restaurants."
+        )
+        fields = summarize(text)
+        self.assertEqual(
+            fields["business"],
+            "We are an alcoholic beverage company that offers beer brands in India.",
+        )
+        labelled = (
+            "Summary of the primary business a. Business Overview - products or services offered by our Company "
+            "We are the largest beverage company operating in India. "
+            "b. Industries served Retailers."
+        )
+        self.assertTrue(summarize(labelled)["business"].startswith("We are the largest beverage company"))
+        sourced = (
+            "Summary of the primary business a. Business Overview - Products and Services "
+            "As per the CRISIL Report, we are a manufacturer of polymer compounds. "
+            "b. Industries served Cable makers."
+        )
+        self.assertTrue(summarize(sourced)["business"].startswith("As per the CRISIL Report"))
+
+    def test_description_can_open_with_the_company_name(self):
+        text = (
+            "Summary of the primary business GAMP Services Limited is a compliance and validation company "
+            "providing validation and qualification solutions to customers in regulated industries. "
+            "a. Business overview – products and services We operate on a B2B business model."
+        )
+        fields = summarize(text)
+        self.assertTrue(fields["business"].startswith("GAMP Services Limited is a compliance"))
+        self.assertNotIn("B2B", fields["business"])
+
+    def test_an_unlettered_products_heading_ends_the_summary(self):
+        text = (
+            "Summary of the primary business Our Business Model We are a technology-led manufacturing platform. "
+            "Business overview – products and services We operate through two segments. "
+            "1. Our Manufacturing Business offers capital goods."
+        )
+        fields = summarize(text)
+        self.assertEqual(fields["business"], "We are a technology-led manufacturing platform.")
+
+    def test_issue_table_is_read_when_the_banner_comes_first(self):
+        fields = summarize("IN THE NATURE OF AN ABRIDGED PROSPECTUS " + ("cover " * 40) + COVER)
+        self.assertEqual(fields["fresh"], "₹2,500 crore")
+        self.assertEqual(fields["ofs"], "none")
 
     def test_bank_name_drops_the_email_header(self):
         self.assertEqual(_bank_name("AND E- MAIL SBI Capital Markets Limited"), "SBI Capital Markets Limited")

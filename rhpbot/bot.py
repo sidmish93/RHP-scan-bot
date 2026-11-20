@@ -19,7 +19,7 @@ import urllib.error
 import urllib.request
 
 from rhpbot.sebi import Filing, _get, attach, filings
-from rhpbot.summary import render, summarize
+from rhpbot.summary import has_business_section, render, summarize
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE_PATH = os.path.join(ROOT, "rhpbot", "state", "filings.json")
@@ -137,8 +137,7 @@ def _prepare(filing: Filing) -> tuple[str, list[tuple[str, bytes]]]:
     if source:
         try:
             data = _download(source)
-            pages = 20 if current.abridged else 8
-            fields = summarize(_pdf_text(data, pages))
+            fields = summarize(_pdf_text(data, full=not current.abridged))
             if current.abridged:
                 files.append((_filename(current, "abridged"), data))
         except Exception as exc:
@@ -152,11 +151,30 @@ def _prepare(filing: Filing) -> tuple[str, list[tuple[str, bytes]]]:
     return text, files
 
 
-def _pdf_text(data: bytes, pages: int) -> str:
+def _pdf_text(data: bytes, full: bool) -> str:
+    """Cover, plus the primary-business section when the prospectus is the full document.
+
+    An abridged prospectus is that summary. A full prospectus prints the same
+    section after the definitions and the risk factors, so those pages are not
+    part of the summary.
+    """
     from pypdf import PdfReader
 
     reader = PdfReader(io.BytesIO(data))
-    return "\n".join((page.extract_text() or "") for page in reader.pages[:pages])
+    pages = reader.pages
+    if not full:
+        return "\n".join((page.extract_text() or "") for page in pages[:30])
+    cover = [(page.extract_text() or "") for page in pages[:12]]
+    if has_business_section("\n".join(cover)):
+        return "\n".join(cover)
+    previous = cover[-1] if cover else ""
+    for index in range(12, min(len(pages), 140)):
+        text = pages[index].extract_text() or ""
+        if has_business_section(previous[-500:] + "\n" + text):
+            following = pages[index + 1].extract_text() or "" if index + 1 < len(pages) else ""
+            return "\n".join(cover + [text, following])
+        previous = text
+    return "\n".join(cover)
 
 
 def _download(url: str) -> bytes:
