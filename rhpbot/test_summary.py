@@ -465,9 +465,76 @@ class SummaryTests(unittest.TestCase):
         business = summarize(text)["business"]
         self.assertTrue(business.startswith("We are engaged in the business of manufacturing"))
         self.assertIn("2-wheeler", business)
-        self.assertNotIn("Contract Manufacturing", business)
-        self.assertNotIn("five manufacturing plants", business)
-        self.assertNotIn("Whereas", business)
+        self.assertIn("five manufacturing plants", business)
+        self.assertNotIn("own brand", business)
+        self.assertNotIn("outsourcing", business)
+
+    def test_a_heading_on_its_own_line_ends_the_description(self):
+        text = (
+            "Summary of the primary business of our Company\n"
+            "We are engaged in the business of manufacturing tyres and tubes. "
+            "Our portfolio caters to two-wheelers. "
+            "We have five manufacturing plants.\n"
+            "\n"
+            "The Business Overview Including Products Offered by our Company\n"
+            "\n"
+            "Manufacturing and Selling: A later section about brands.\n"
+        )
+        business = summarize(text)["business"]
+        self.assertIn("manufacturing tyres", business)
+        self.assertIn("five manufacturing plants", business)
+        self.assertNotIn("later section", business)
+        self.assertNotIn("Including Products", business)
+
+    def test_an_overview_heading_introduces_the_description(self):
+        text = (
+            "OUR BUSINESS Some of the information in this section contains forward-looking statements. "
+            "Industry Overview begins on page 190. "
+            "Overview We are a global luxury food services business focused on curated culinary experiences. "
+            "As per the F&S Report, we were the largest player by revenue in Fiscal 2025.\n"
+            "Our Businesses\n"
+            "Events Catering We provide catering services.\n"
+        )
+        business = summarize(text)["business"]
+        self.assertTrue(business.startswith("We are a global luxury food services"))
+        self.assertIn("Fiscal 2025", business)
+        self.assertNotIn("forward-looking", business)
+        self.assertNotIn("Events Catering", business)
+
+    def test_a_pointer_to_another_chapter_is_not_kept(self):
+        text = (
+            "Summary of the primary business "
+            "We are a manufacturer of polymer compounds. "
+            'For more details, please refer to "Our Business" on page 247.'
+        )
+        self.assertEqual(
+            summarize(text)["business"],
+            "We are a manufacturer of polymer compounds.",
+        )
+
+    def test_a_total_without_a_rupee_sign_before_the_placeholder_is_kept(self):
+        text = (
+            "FRESH ISSUE "
+            "Up to 15,808,000 Equity Shares of face value of ₹2 each aggregating up to ₹[●] million. "
+            "Up to 8,242,000 Equity Shares of face value of ₹2 each aggregating up to ₹[●] million. "
+            "Up to 24,050,000 Equity Shares of face value of ₹2 each aggregating up to [●] million. "
+            "The Offer is being made pursuant to Regulation 6(1)"
+        )
+        fields = summarize(text)
+        self.assertIn("15,808,000", fields["fresh"])
+        self.assertIn("8,242,000", fields["ofs"])
+        self.assertIn("24,050,000", fields["total"])
+
+    def test_contract_manufacturing_is_kept_when_that_is_the_business(self):
+        text = (
+            "Summary of the primary business "
+            "We are engaged in the business of contract manufacturing of precision parts "
+            "for automotive companies. "
+            "a. Industries served Vehicle makers."
+        )
+        business = summarize(text)["business"]
+        self.assertIn("contract manufacturing of precision parts", business)
+        self.assertNotIn("Vehicle makers", business)
 
 
 if __name__ == "__main__":

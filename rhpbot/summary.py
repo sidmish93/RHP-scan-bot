@@ -15,7 +15,7 @@ _SIZE = re.compile(
     r"(?:up\s+to\s+)?(?P<shares>\[(?:●|•)\]|[\d,]+)\s+equity\s+shares"
     r"(?:\s+(?:of|bearing)\s+face\s+value\s+of\s+₹\s*(?P<face>[\d,.]+)(?:\s*/-)?\s+each)?"
     r".{0,180}?"
-    r"aggregating(?:\s+up)?\s+to\s+₹\s*(?P<amount>\[(?:●|•)\]|[\d,]+(?:\.\d+)?)\s*"
+    r"aggregating(?:\s+up)?\s+to\s+₹?\s*(?P<amount>\[(?:●|•)\]|[\d,]+(?:\.\d+)?)\s*"
     r"(?P<unit>lakhs?|crores?|millions?)"
     r"|(?P<na>\bnot\s+applicable\b)"
     r"|aggregating(?:\s+up)?\s+to\s+₹\s*(?P<only>[\d,]+(?:\.\d+)?)\s*(?P<only_unit>lakhs?|crores?|millions?)",
@@ -40,7 +40,7 @@ def summarize(text: str) -> dict[str, str]:
     elif sellers:
         fields["sellers"] = "; ".join(sellers)
 
-    business = _business(collapsed)
+    business = _business(text or "")
     if business:
         fields["business"] = business
     return fields
@@ -176,7 +176,8 @@ def _bank_name(raw: str) -> str:
 
 # The abridged prospectus schedule item, not a sentence that happens to say "we are".
 _SECTION = re.compile(
-    r"summary of (?:the )?primary business|(?<![A-Za-z])primary business(?=\s+[a-h][.)])",
+    r"summary of (?:the )?primary business(?:\s+of\s+(?:our|the)\s+company)?"
+    r"|(?<![A-Za-z])primary business(?=\s+[a-h][.)])",
     re.I,
 )
 # The next outline item. The period that closes the previous sentence stays in that sentence.
@@ -187,6 +188,13 @@ _OUTLINE = re.compile(
     r"|(?:^|(?<! [a-h]\.\s)(?<=\.\s))business overview\b"
     r"|➢",
     re.I,
+)
+# A schedule label such as "Manufacturing and Selling:" is the next item.
+# Case-sensitive so an ordinary sentence is not cut at a lowercase word.
+_COLON_HEADING = re.compile(
+    r"(?<=\.)\s+[A-Z][A-Za-z&]+"
+    r"(?:\s+(?:and|of|the|for|in|to|by|our|or|&|[A-Z][A-Za-z&]+)){0,6}"
+    r":\s+(?=[A-Z])"
 )
 # The schedule label in front of the first sentence, for example
 # "Business overview – products or services offered by our Company".
@@ -226,42 +234,40 @@ def prefer_fields(primary: dict[str, str], fallback: dict[str, str]) -> dict[str
 
 
 def _poor_business(text: str) -> bool:
+    """A checklist or a pointer to another chapter, not a description of the company."""
     low = (text or "").lower()
     if len(low) < 25:
         return True
-    return any(
-        phrase in low
-        for phrase in (
-            "➢",
-            "for further details",
-            "segment reporting",
-            "contract manufacturing",
-            "manufacturing & selling",
-            "manufacturing and selling",
-            "we have in total",
-            "business overview including",
-        )
-    )
+    return "➢" in text or "for further details" in low
 
 
 def _business(text: str) -> str:
-    """The prose under the primary-business heading, through the next outline item.
+    """The prose under the primary-business heading, through the next heading.
 
     The paragraph may open with the company's name. When that heading is only a
-    label, the description is the first lettered subsection. A later products
-    table is the next outline item, so it is not part of the paragraph. A
-    checklist that only points at a later chapter is not the description.
+    label, the description is the first lettered subsection. A later heading,
+    including one that sits on its own line, is the next item. A checklist that
+    only points at a later chapter is not the description.
     """
     end = _section_end(text)
-    body = _clean_business(_business_body(text[end:end + 4000])) if end >= 0 else ""
-    if not _poor_business(body):
-        return body
-    return _engaged_paragraph(text)
+    if end >= 0:
+        region = _cut_at_heading_line(text[end:end + 6000])
+        body = _clean_business(_business_body(_SPACE.sub(" ", region)))
+        if not _poor_business(body):
+            return body
+        # The opening sentence is already in this section. A later chapter is not it.
+        return _engaged_paragraph(_SPACE.sub(" ", text[end:]), from_start=True)
+    return _engaged_paragraph(_SPACE.sub(" ", text))
 
 
 def _clean_business(body: str) -> str:
     body = re.sub(r"^(?:overview of the business|our business|overview)\s*[:\-–—]?\s*", "", body, flags=re.I)
-    body = re.sub(r"\s*For further (?:details|information), see\b.*$", "", body, flags=re.I)
+    body = re.sub(
+        r"\s*For (?:further|more) (?:details|information), (?:please\s+)?(?:see|refer to)\b.*$",
+        "",
+        body,
+        flags=re.I,
+    )
     body = re.sub(r"([A-Za-z]{3,})\d{1,2}\b", r"\1", body)
     body = re.sub(r"\s+\.", ".", body)
     body = _SPACE.sub(" ", body).strip()
@@ -285,10 +291,13 @@ def _chapter_start(text: str) -> int:
     return -1
 
 
-def _engaged_paragraph(text: str) -> str:
+def _engaged_paragraph(text: str, from_start: bool = False) -> str:
     """The sentence that says what the company does, after the chapter's disclaimer."""
-    start = _chapter_start(text)
-    window = text[start:] if start >= 0 else text or ""
+    if from_start:
+        window = text or ""
+    else:
+        start = _chapter_start(text)
+        window = text[start:] if start >= 0 else text or ""
     match = re.search(
         r"([A-Z][^.]{0,160}?\b(?:is|are) engaged in the business of\b[^.]*\.)",
         window,
@@ -325,11 +334,80 @@ def _section_end(text: str) -> int:
             continue
         if "." in after and re.search(r"\b(?:we|the company|our company)\b", after, re.I):
             return match.end()
+    # The business chapter often starts at a bare "Overview", after the disclaimer.
+    for match in re.finditer(r"\bOverview\b", text or ""):
+        before = text[max(0, match.start() - 24):match.start()]
+        if re.search(r"industry\s*$", before, re.I):
+            continue
+        after = text[match.end():match.end() + 80]
+        if re.match(r"\s*(?:We|Our Company|The Company)\b", after):
+            return match.end()
     return -1
 
 
+def _cut_at_heading_line(region: str) -> str:
+    """Stop before a heading that the line break still separates from the paragraph."""
+    if "\n" not in region:
+        return region
+    kept: list[str] = []
+    seen_sentence = False
+    blank = False
+    previous_ended = False
+    for line in region.split("\n"):
+        stripped = re.sub(r"[ \t]+", " ", line).strip()
+        words = re.findall(r"[A-Za-z]+", stripped)
+        # A short heading can sit on the next line with no blank line between.
+        # A wrapped sentence is not a heading, and a long heading still needs a blank line.
+        short_heading = _is_heading_line(stripped) and 1 <= len(words) <= 4
+        if seen_sentence and _is_heading_line(stripped) and (
+            blank or _hard_heading(stripped) or (previous_ended and short_heading)
+        ):
+            break
+        kept.append(line)
+        if not stripped:
+            blank = True
+            continue
+        blank = False
+        previous_ended = stripped.endswith((".", "!", "?"))
+        if "." in stripped:
+            seen_sentence = True
+    return "\n".join(kept)
+
+
+def _hard_heading(line: str) -> bool:
+    """An outline mark or a short label ending in a colon, not a wrapped sentence."""
+    if not line:
+        return False
+    if line[0] in "➢•":
+        return True
+    if re.match(r"\(?[a-h][.)]\s+\S", line, re.I):
+        return True
+    if re.match(r"(?:[1-9]|1[0-2])[.)]\s+\S", line):
+        return True
+    words = re.findall(r"[A-Za-z]+", line)
+    return line.endswith(":") and 1 <= len(words) <= 8 and len(line) <= 80
+
+
+def _is_heading_line(line: str) -> bool:
+    """A schedule heading, not a line of the description that happens to wrap."""
+    if not line or len(line) > 160 or line[-1] in ".;,":
+        return False
+    if re.search(r"\.\s", line) or re.match(r"\(?\s*source\b", line, re.I):
+        return False
+    if _hard_heading(line):
+        return True
+    words = re.findall(r"[A-Za-z]+", line)
+    if not 2 <= len(words) <= 16 or "," in line:
+        return False
+    small = {"a", "an", "and", "of", "the", "for", "in", "to", "by", "our", "or", "on", "with"}
+    return all(word.lower() in small or word[0].isupper() for word in words)
+
+
 def _business_body(region: str) -> str:
-    marks = list(_OUTLINE.finditer(region))
+    marks = sorted(
+        [*_OUTLINE.finditer(region), *_COLON_HEADING.finditer(region)],
+        key=lambda match: match.start(),
+    )
     if not marks:
         return _drop_title(region)
     intro = _drop_title(region[:marks[0].start()])
