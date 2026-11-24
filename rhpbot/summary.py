@@ -229,7 +229,19 @@ def _poor_business(text: str) -> bool:
     low = (text or "").lower()
     if len(low) < 25:
         return True
-    return "➢" in text or "for further details" in low or "segment reporting" in low
+    return any(
+        phrase in low
+        for phrase in (
+            "➢",
+            "for further details",
+            "segment reporting",
+            "contract manufacturing",
+            "manufacturing & selling",
+            "manufacturing and selling",
+            "we have in total",
+            "business overview including",
+        )
+    )
 
 
 def _business(text: str) -> str:
@@ -285,6 +297,9 @@ def _engaged_paragraph(text: str) -> str:
     if not match:
         return ""
     sentence = re.sub(r"^(?:overview|our business)\s+", "", match.group(1), flags=re.I).strip()
+    opened = re.search(r"\b(?:We|Our Company)\b(?= (?:is|are) engaged\b)", sentence)
+    if opened:
+        sentence = sentence[opened.start():]
     follow = re.match(r"\s+((?:Through|Our|The|These|This)\b[^.]*\.)", window[match.end():])
     if follow:
         sentence = f"{sentence} {follow.group(1).strip()}"

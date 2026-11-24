@@ -452,6 +452,23 @@ class SummaryTests(unittest.TestCase):
         self.assertNotIn("forward-looking", business)
         self.assertNotIn("plant support", business)
 
+    def test_a_product_catalogue_is_not_the_business_description(self):
+        text = (
+            "Summary of the primary business of Our Company We are engaged in the business of "
+            "manufacturing of tyres, tyre-flaps, tubes and rubber compound. "
+            "Our tyre portfolio primarily caters to the 2-wheeler and 3-wheeler segments. "
+            "Whereas, rubber compound is used in other rubber materials. "
+            "We have in total five manufacturing plants. "
+            "Manufacturing and Selling: A business model wherein a company sells under its own brand. "
+            "Contract Manufacturing: Contract manufacturing is an outsourcing arrangement."
+        )
+        business = summarize(text)["business"]
+        self.assertTrue(business.startswith("We are engaged in the business of manufacturing"))
+        self.assertIn("2-wheeler", business)
+        self.assertNotIn("Contract Manufacturing", business)
+        self.assertNotIn("five manufacturing plants", business)
+        self.assertNotIn("Whereas", business)
+
 
 if __name__ == "__main__":
     unittest.main()
