@@ -390,6 +390,68 @@ class SummaryTests(unittest.TestCase):
         )
         self.assertIn("Bankers: Choice Capital Advisors Private Limited\n\nSelling shareholders: none", body)
 
+    def test_nil_between_two_size_cells_is_an_empty_offer_for_sale(self):
+        text = """
+        DETAILS OF THE ISSUE
+        Fresh Issue Up to 2,70,00,000 Equity Shares of face value of ₹ 10/- each aggregating up to ₹ [●] Lakhs
+        NIL
+        Up to 2,70,00,000 Equity Shares of face value of ₹ 10/- each aggregating up to ₹ [●] Lakhs
+        The Issue is being made pursuant to Regulation 6(1)
+        """
+        fields = summarize(text)
+        self.assertIn("2,70,00,000", fields["fresh"])
+        self.assertIn("face value ₹10", fields["fresh"])
+        self.assertEqual(fields["ofs"], "none")
+        self.assertIn("2,70,00,000", fields["total"])
+        self.assertEqual(fields["sellers"], "none")
+
+    def test_seller_table_with_a_share_count_and_no_rupee_cell(self):
+        names = _sellers(
+            "DETAILS OF THE SELLING SHAREHOLDERS "
+            "Vandana Rubber and Chemicals Private Limited Promoter Selling Shareholder 13,63,000 26.67 "
+            "Anju Khanna Other Selling Shareholder 60,000 83.33 "
+            "Radhika Gupta Promoter Selling Shareholder 2,150 1.47"
+        )
+        self.assertEqual(
+            names,
+            [
+                "Vandana Rubber and Chemicals Private Limited (13,63,000 shares)",
+                "Anju Khanna (60,000 shares)",
+                "Radhika Gupta (2,150 shares)",
+            ],
+        )
+
+    def test_an_arrow_checklist_is_not_the_business_description(self):
+        text = (
+            "Summary of the primary business "
+            "➢ Overview of the Business: Monomark Engineering (India) Limited is engaged in the business of "
+            "providing operations and maintenance services to industrial clients. "
+            "Through our integrated service offerings, we support our clients in reducing downtime. "
+            "➢ Description of Industries served and typical customers Our services are deployed across cement. "
+            "➢ Segment reporting details For further details, refer Our Business beginning on page 185."
+        )
+        business = summarize(text)["business"]
+        self.assertIn("engaged in the business of providing operations and maintenance", business)
+        self.assertIn("reducing downtime", business)
+        self.assertNotIn("➢", business)
+        self.assertNotIn("page 185", business)
+        self.assertNotIn("Industries served", business)
+
+    def test_the_business_chapter_skips_the_forward_looking_disclaimer(self):
+        text = (
+            "OUR BUSINESS Some of the information in this section contains forward-looking statements. "
+            "You should read the risk factors. "
+            "OVERVIEW Monomark Engineering (India) Limited is engaged in the business of providing "
+            "operations and maintenance services to industrial clients. "
+            "Through our integrated service offerings, we support our clients in reducing downtime. "
+            "INDUSTRIAL OPERATIONS AND MAINTENANCE Our O&M services involve plant support."
+        )
+        business = summarize(text)["business"]
+        self.assertTrue(business.startswith("Monomark Engineering (India) Limited is engaged"))
+        self.assertIn("reducing downtime", business)
+        self.assertNotIn("forward-looking", business)
+        self.assertNotIn("plant support", business)
+
 
 if __name__ == "__main__":
     unittest.main()

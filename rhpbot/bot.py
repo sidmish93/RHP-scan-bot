@@ -19,7 +19,7 @@ import urllib.error
 import urllib.request
 
 from rhpbot.sebi import Filing, _get, attach, filings
-from rhpbot.summary import has_business_section, render, summarize
+from rhpbot.summary import has_business_section, needs_full_prospectus, prefer_fields, render, summarize
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE_PATH = os.path.join(ROOT, "rhpbot", "state", "filings.json")
@@ -148,9 +148,9 @@ def _prepare(filing: Filing) -> tuple[str, list[tuple[str, bytes]]]:
             files.append((_filename(current, "abridged"), data))
         except Exception as exc:
             print(f"abridged skipped: {exc}", flush=True)
-    if not fields and current.full:
+    if current.full and (not fields or needs_full_prospectus(fields)):
         try:
-            fields = summarize(_pdf_text(_download(current.full), full=True))
+            fields = prefer_fields(fields, summarize(_pdf_text(_download(current.full), full=True)))
         except Exception as exc:
             print(f"summary skipped: {exc}", flush=True)
     text = render(current.kind, current.company, current.filed, fields, current.page, current.full)
@@ -174,13 +174,25 @@ def _pdf_text(data: bytes, full: bool) -> str:
     if has_business_section("\n".join(cover)):
         return "\n".join(cover)
     previous = cover[-1] if cover else ""
-    for index in range(12, min(len(pages), 140)):
+    for index in range(12, len(pages)):
         text = pages[index].extract_text() or ""
-        if has_business_section(previous[-500:] + "\n" + text):
+        if index < 140 and has_business_section(previous[-500:] + "\n" + text):
             following = pages[index + 1].extract_text() or "" if index + 1 < len(pages) else ""
             return "\n".join(cover + [text, following])
+        if _is_our_business_page(text):
+            extra = [(page.extract_text() or "") for page in pages[index + 1:index + 3]]
+            return "\n".join(cover + [text, *extra])
         previous = text
+        if index >= 260:
+            break
     return "\n".join(cover)
+
+
+def _is_our_business_page(text: str) -> bool:
+    """The chapter page, not the contents line that only points at it."""
+    if re.search(r"OUR BUSINESS\s*\.{4,}", text or "", re.I):
+        return False
+    return re.search(r"(?m)^[ \t]*OUR BUSINESS[ \t]*$", text or "") is not None
 
 
 def _download(url: str) -> bytes:

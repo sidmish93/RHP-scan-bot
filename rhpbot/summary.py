@@ -13,7 +13,7 @@ _BANK = re.compile(
 _SIZE = re.compile(
     r"(?:(?:fresh issue(?:\s+and\s+offer\s+for\s+sale)?|offer\s+for\s+sale)\s+of\s+)?"
     r"(?:up\s+to\s+)?(?P<shares>\[(?:●|•)\]|[\d,]+)\s+equity\s+shares"
-    r"(?:\s+(?:of|bearing)\s+face\s+value\s+of\s+₹\s*(?P<face>[\d,.]+)\s+each)?"
+    r"(?:\s+(?:of|bearing)\s+face\s+value\s+of\s+₹\s*(?P<face>[\d,.]+)(?:\s*/-)?\s+each)?"
     r".{0,180}?"
     r"aggregating(?:\s+up)?\s+to\s+₹\s*(?P<amount>\[(?:●|•)\]|[\d,]+(?:\.\d+)?)\s*"
     r"(?P<unit>lakhs?|crores?|millions?)"
@@ -116,9 +116,18 @@ def _issue(cover: str) -> dict[str, str]:
     stop = re.search(r"\bThe (?:Issue|Offer) is being made\b", data, re.I)
     if stop:
         data = data[:stop.start()]
+    matches = list(_SIZE.finditer(data))
+    # "NIL" between two size cells is an empty offer for sale. The second cell is the total.
+    if len(matches) >= 2 and re.search(r"\bnil\b", data[matches[0].end():matches[1].start()], re.I):
+        fields = {
+            "fresh": _size_text(matches[0]),
+            "ofs": "none",
+            "total": _size_text(matches[1]),
+        }
+        return fields
     labels = ("fresh", "ofs", "total")
     fields: dict[str, str] = {}
-    for label, match in zip(labels, _SIZE.finditer(data)):
+    for label, match in zip(labels, matches):
         fields[label] = _size_text(match)
     return fields
 
@@ -175,7 +184,8 @@ _OUTLINE = re.compile(
     r"\s+\(?[a-h]\)(?=\s+[A-Z])"
     r"|\s+[a-h][.)](?=\s+[A-Z])"
     r"|\s+(?:[1-9]|1[0-2])[.)](?=\s+[A-Z])"
-    r"|(?:^|(?<! [a-h]\.\s)(?<=\.\s))business overview\b",
+    r"|(?:^|(?<! [a-h]\.\s)(?<=\.\s))business overview\b"
+    r"|➢",
     re.I,
 )
 # The schedule label in front of the first sentence, for example
@@ -195,18 +205,50 @@ def has_business_section(text: str) -> bool:
     return _section_end(_SPACE.sub(" ", text or "")) >= 0
 
 
+def needs_full_prospectus(fields: dict[str, str]) -> bool:
+    """An abridged file can be a checklist with no offer. The prospectus still has to be read."""
+    if not any(fields.get(key) for key in ("fresh", "ofs", "total")):
+        return True
+    return _poor_business(fields.get("business", ""))
+
+
+def prefer_fields(primary: dict[str, str], fallback: dict[str, str]) -> dict[str, str]:
+    """Keep a real description and fill whatever the first document left out."""
+    chosen = dict(primary)
+    for key, value in fallback.items():
+        if key == "business" and _poor_business(chosen.get("business", "")) and not _poor_business(value):
+            chosen["business"] = value
+        elif key not in chosen:
+            chosen[key] = value
+    if chosen.get("ofs") == "none":
+        chosen["sellers"] = "none"
+    return chosen
+
+
+def _poor_business(text: str) -> bool:
+    low = (text or "").lower()
+    if len(low) < 25:
+        return True
+    return "➢" in text or "for further details" in low or "segment reporting" in low
+
+
 def _business(text: str) -> str:
     """The prose under the primary-business heading, through the next outline item.
 
     The paragraph may open with the company's name. When that heading is only a
     label, the description is the first lettered subsection. A later products
-    table is the next outline item, so it is not part of the paragraph.
+    table is the next outline item, so it is not part of the paragraph. A
+    checklist that only points at a later chapter is not the description.
     """
     end = _section_end(text)
-    if end < 0:
-        return ""
-    region = text[end:end + 4000]
-    body = _business_body(region)
+    body = _clean_business(_business_body(text[end:end + 4000])) if end >= 0 else ""
+    if not _poor_business(body):
+        return body
+    return _engaged_paragraph(text)
+
+
+def _clean_business(body: str) -> str:
+    body = re.sub(r"^(?:overview of the business|our business|overview)\s*[:\-–—]?\s*", "", body, flags=re.I)
     body = re.sub(r"\s*For further (?:details|information), see\b.*$", "", body, flags=re.I)
     body = re.sub(r"([A-Za-z]{3,})\d{1,2}\b", r"\1", body)
     body = re.sub(r"\s+\.", ".", body)
@@ -219,6 +261,35 @@ def _business(text: str) -> str:
     if len(body) > 1800:
         body = body[:1800].rsplit(". ", 1)[0] + "."
     return body
+
+
+def _chapter_start(text: str) -> int:
+    """The business chapter, not the contents line that points at it."""
+    for match in re.finditer(r"\bOUR BUSINESS\b", text or "", re.I):
+        after = text[match.end():match.end() + 30]
+        if re.match(r"\s*\.{3,}", after) or re.match(r"\s+STRATEG", after, re.I):
+            continue
+        return match.end()
+    return -1
+
+
+def _engaged_paragraph(text: str) -> str:
+    """The sentence that says what the company does, after the chapter's disclaimer."""
+    start = _chapter_start(text)
+    window = text[start:] if start >= 0 else text or ""
+    match = re.search(
+        r"([A-Z][^.]{0,160}?\b(?:is|are) engaged in the business of\b[^.]*\.)",
+        window,
+        re.I,
+    )
+    if not match:
+        return ""
+    sentence = re.sub(r"^(?:overview|our business)\s+", "", match.group(1), flags=re.I).strip()
+    follow = re.match(r"\s+((?:Through|Our|The|These|This)\b[^.]*\.)", window[match.end():])
+    if follow:
+        sentence = f"{sentence} {follow.group(1).strip()}"
+    sentence = _SPACE.sub(" ", sentence).strip()
+    return "" if _poor_business(sentence) else sentence
 
 
 def _section_end(text: str) -> int:
@@ -404,5 +475,15 @@ def _sellers(text: str) -> list[str]:
             detail = f"up to {shares} shares"
         add(f"{name} ({detail})")
         previous = match.end()
+    # A cover table can list the name, the type, and the share count, with no rupee cell.
+    if not found:
+        for match in re.finditer(
+            r"([A-Z][A-Za-z0-9&.,'’\- ]{2,80}?)\s+"
+            r"(?:Promoter Group|Promoter|Investor|Individual|Other)\s+"
+            r"Selling Shareholders?\s+"
+            r"([\d,]+)\b",
+            text,
+        ):
+            add(f"{match.group(1).strip(' ,')} ({match.group(2)} shares)")
     return found[:12]
 
